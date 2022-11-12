@@ -7,7 +7,8 @@ const logger = require('morgan');
 const cors = require('cors');
 const db = require('./mongo');
 
-const config = JSON.parse(readFileSync('./config.json'));
+const configFile = path.join(process.cwd(), 'config.json');
+const config = JSON.parse(readFileSync(configFile));
 
 require('dotenv').config();
 
