@@ -20,7 +20,7 @@ db.connectToMongo(() => {
 
 const app = express();
 
-const apiRouter = require('./apiRouter');
+const apiRouter = require('./api/apiRouter');
 
 app.use(cors());
 app.use(logger('dev'));
@@ -29,9 +29,5 @@ app.use(express.urlencoded({ extended: false }));
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/api', apiRouter);
-
-app.get('/', (req, res) => {
-    res.send('Subreddit Subscriptions API');
-});
 
 module.exports = app;
