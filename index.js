@@ -10,6 +10,7 @@ require('dotenv').config();
 
 db.connectToMongo(() => {
     console.log('Connected to MongoDB');
+    console.log(config);
     db.getDb()
         .collection(config.submissionsCollection)
         .createIndex(
