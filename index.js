@@ -1,11 +1,14 @@
 const createError = require('http-errors');
 const express = require('express');
 const path = require('path');
+const { readFileSync } = require('fs');
 const cookieParser = require('cookie-parser');
 const logger = require('morgan');
 const cors = require('cors');
 const db = require('./mongo');
-const config = require('./config');
+
+const config = JSON.parse(readFileSync('./config.json'));
+
 require('dotenv').config();
 
 db.connectToMongo(() => {
