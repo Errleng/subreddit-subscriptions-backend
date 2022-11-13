@@ -179,7 +179,7 @@ function updateSubmissionMedia(submission) {
                 }
             }
 
-            console.log(`Updating submission ${submission.id} - ${submission.title} took: ${performance.now() - startTime}ms`);
+            console.log(`Fetching submission ${submission.id} - ${submission.title} took: ${performance.now() - startTime}ms`);
             return modifiedSubmission;
         });
     }
@@ -217,7 +217,7 @@ function updateSubmissionInDb(submission) {
         .collection(config.submissionsCollection)
         .updateOne(filter, updateDocument, options)
         .then((result) => {
-            // console.log(`Updated submission ${submissionObj.id}:`, result);
+            console.log(`Updated submission ${submissionObj.id} in database`);
         })
         .catch((err) => console.log('Error inserting submission into database:', err));
 }
