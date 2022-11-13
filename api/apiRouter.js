@@ -18,17 +18,11 @@ router.get('/valid/subreddit/:subredditName', (req, res) => {
 });
 
 function hasProp(object, propertyName) {
-    return (
-        Object.prototype.hasOwnProperty.call(object, propertyName) &&
-        object[propertyName] !== null &&
-        object[propertyName] !== undefined
-    );
+    return Object.prototype.hasOwnProperty.call(object, propertyName) && object[propertyName] !== null && object[propertyName] !== undefined;
 }
 
 function isValidThumbnail(thumbnail) {
-    return (
-        thumbnail.length > 0 && thumbnail !== 'default' && thumbnail !== 'nsfw'
-    );
+    return thumbnail.length > 0 && thumbnail !== 'default' && thumbnail !== 'nsfw';
 }
 
 function getSubmissionPreviewImageUrls(submission) {
@@ -44,13 +38,7 @@ function getSubmissionPreviewImageUrls(submission) {
 
             let previewImage;
             if (previewImages.length > 0) {
-                previewImage =
-                    previewImages[
-                        Math.min(
-                            previewImages.length - 1,
-                            MAX_PREVIEW_RESOLUTION_INDEX
-                        )
-                    ].url;
+                previewImage = previewImages[Math.min(previewImages.length - 1, MAX_PREVIEW_RESOLUTION_INDEX)].url;
             } else {
                 previewImage = images[0].source.url;
             }
@@ -70,13 +58,7 @@ function getSubmissionPreviewImageUrls(submission) {
                 let imagePreview;
                 if (previewImages.length > 0) {
                     const MAX_PREVIEW_RESOLUTION_INDEX = 3;
-                    imagePreview =
-                        previewImages[
-                            Math.min(
-                                previewImages.length - 1,
-                                MAX_PREVIEW_RESOLUTION_INDEX
-                            )
-                        ].u;
+                    imagePreview = previewImages[Math.min(previewImages.length - 1, MAX_PREVIEW_RESOLUTION_INDEX)].u;
                 } else {
                     imagePreview = metadata.s.u;
                 }
@@ -84,9 +66,7 @@ function getSubmissionPreviewImageUrls(submission) {
                 imageUrls.push(imagePreview);
             });
         } else {
-            throw new Error(
-                `Submission ${submission.url} has is_gallery (${submission.is_gallery}) but does not have gallery_data (${submission.gallery_data})`
-            );
+            throw new Error(`Submission ${submission.url} has is_gallery (${submission.is_gallery}) but does not have gallery_data (${submission.gallery_data})`);
         }
     } else if (hasProp(submission, 'thumbnail')) {
         if (isValidThumbnail(submission.thumbnail)) {
@@ -102,22 +82,9 @@ async function getSubmissionPreviewImagesWrapper(submission) {
     //   text post (is_self)
     //   post with previews (preview)
     //   gallery post (is_gallery == true and gallery_data != null)
-    if (
-        !submission.is_self &&
-        !(
-            hasProp(submission, 'preview') &&
-            hasProp(submission.preview, 'images')
-        ) &&
-        !(
-            hasProp(submission, 'is_gallery') &&
-            submission.is_gallery &&
-            hasProp(submission, 'gallery_data')
-        )
-    ) {
+    if (!submission.is_self && !(hasProp(submission, 'preview') && hasProp(submission.preview, 'images')) && !(hasProp(submission, 'is_gallery') && submission.is_gallery && hasProp(submission, 'gallery_data'))) {
         await submission.fetch().then((updatedSubmission) => {
-            console.log(
-                `Fetching data for ambiguous image post: ${submission.title}, ${submission.url}`
-            );
+            console.log(`Fetching data for ambiguous image post: ${submission.title}, ${submission.url}`);
             submission = updatedSubmission;
         });
     }
@@ -167,30 +134,9 @@ function getMedia(submission) {
 }
 
 async function getMediaWrapper(submission) {
-    if (
-        !submission.is_self &&
-        !(
-            hasProp(submission, 'media_embed') &&
-            hasProp(submission.media_embed, 'content')
-        ) &&
-        !(
-            hasProp(submission, 'media') &&
-            ((hasProp(submission.media, 'oembed') &&
-                (hasProp(submission.media.oembed, 'html') ||
-                    hasProp(submission.media.oembed, 'thumbnail_url'))) ||
-                (hasProp(submission.media, 'reddit_video') &&
-                    hasProp(submission.media.reddit_video, 'fallback_url')))
-        ) &&
-        !(
-            hasProp(submission, 'preview') &&
-            hasProp(submission.preview, 'reddit_video_preview') &&
-            hasProp(submission.preview.reddit_video_preview, 'fallback_url')
-        )
-    ) {
+    if (!submission.is_self && !(hasProp(submission, 'media_embed') && hasProp(submission.media_embed, 'content')) && !(hasProp(submission, 'media') && ((hasProp(submission.media, 'oembed') && (hasProp(submission.media.oembed, 'html') || hasProp(submission.media.oembed, 'thumbnail_url'))) || (hasProp(submission.media, 'reddit_video') && hasProp(submission.media.reddit_video, 'fallback_url')))) && !(hasProp(submission, 'preview') && hasProp(submission.preview, 'reddit_video_preview') && hasProp(submission.preview.reddit_video_preview, 'fallback_url'))) {
         await submission.fetch().then((updatedSubmission) => {
-            console.log(
-                `Fetching data for ambiguous media post: ${submission.title}, ${submission.url}`
-            );
+            console.log(`Fetching data for ambiguous media post: ${submission.title}, ${submission.url}`);
             submission = updatedSubmission;
         });
     }
@@ -220,21 +166,20 @@ function addMediaData(submission, mediaObject) {
 
 function updateSubmissionMedia(submission) {
     if (config.fetchAll) {
+        const startTime = performance.now();
         return submission.fetch().then((updatedData) => {
             const modifiedSubmission = updatedData;
             const mediaObject = getMedia(modifiedSubmission);
             addMediaData(modifiedSubmission, mediaObject);
             if (mediaObject === null) {
                 try {
-                    modifiedSubmission.imageUrls =
-                        getSubmissionPreviewImageUrls(modifiedSubmission);
+                    modifiedSubmission.imageUrls = getSubmissionPreviewImageUrls(modifiedSubmission);
                 } catch (err) {
-                    console.error(
-                        `Error while fetching preview images for ${modifiedSubmission.title} (${modifiedSubmission.url}):`,
-                        err
-                    );
+                    console.error(`Error while fetching preview images for ${modifiedSubmission.title} (${modifiedSubmission.url}):`, err);
                 }
             }
+
+            console.log(`Updating submission ${submission.id} - ${submission.title} took: ${performance.now() - startTime}ms`);
             return modifiedSubmission;
         });
     }
@@ -243,13 +188,9 @@ function updateSubmissionMedia(submission) {
         addMediaData(submission, mediaObject);
         if (mediaObject === null) {
             try {
-                submission.imageUrls =
-                    getSubmissionPreviewImageUrls(submission);
+                submission.imageUrls = getSubmissionPreviewImageUrls(submission);
             } catch (err) {
-                console.error(
-                    `Error while fetching preview images for ${submission.title} (${submission.url}):`,
-                    err
-                );
+                console.error(`Error while fetching preview images for ${submission.title} (${submission.url}):`, err);
             }
         }
         resolve(submission);
@@ -278,9 +219,7 @@ function updateSubmissionInDb(submission) {
         .then((result) => {
             // console.log(`Updated submission ${submissionObj.id}:`, result);
         })
-        .catch((err) =>
-            console.log('Error inserting submission into database:', err)
-        );
+        .catch((err) => console.log('Error inserting submission into database:', err));
 }
 
 function updateOldSubmissionInDb(snoowrapSubmission, dbSubmission) {
@@ -290,16 +229,12 @@ function updateOldSubmissionInDb(snoowrapSubmission, dbSubmission) {
         const msSinceUpdate = newUpdateTime - oldUpdateTime;
         const minsSinceUpdate = msSinceUpdate / 1000 / 60;
         if (minsSinceUpdate > config.minutesUntilUpdate) {
-            console.log(
-                `Updating ${minsSinceUpdate} minutes old submission ${snoowrapSubmission.id}`
-            );
-            return updateSubmissionMedia(snoowrapSubmission).then(
-                (mediaSubmission) => {
-                    mediaSubmission.lastUpdateTime = newUpdateTime;
-                    updateSubmissionInDb(mediaSubmission);
-                    return mediaSubmission;
-                }
-            );
+            console.log(`Updating ${minsSinceUpdate} minutes old submission ${snoowrapSubmission.id}`);
+            return updateSubmissionMedia(snoowrapSubmission).then((mediaSubmission) => {
+                mediaSubmission.lastUpdateTime = newUpdateTime;
+                updateSubmissionInDb(mediaSubmission);
+                return mediaSubmission;
+            });
         }
     } else {
         dbSubmission.lastUpdateTime = newUpdateTime;
@@ -313,100 +248,74 @@ function updateOldSubmissionInDb(snoowrapSubmission, dbSubmission) {
     });
 }
 
-router.get(
-    '/subreddit/:subredditName/:sortType/:sortTime/:numSubmissions',
-    (req, res) => {
-        const { sortType, sortTime } = req.params;
-        const numSubmissions = parseInt(req.params.numSubmissions, 10);
-        const subreddit = reddit.getSubreddit(req.params.subredditName);
+router.get('/subreddit/:subredditName/:sortType/:sortTime/:numSubmissions', (req, res) => {
+    const { sortType, sortTime } = req.params;
+    const numSubmissions = parseInt(req.params.numSubmissions, 10);
+    const subreddit = reddit.getSubreddit(req.params.subredditName);
 
-        let sortFunction = null;
-        switch (sortType) {
-            case 'hot':
-                sortFunction = subreddit.getHot.bind(subreddit);
-                break;
-            case 'new':
-                sortFunction = subreddit.getNew.bind(subreddit);
-                break;
-            case 'top':
-                sortFunction = subreddit.getTop.bind(subreddit);
-                break;
-            case 'rising':
-                sortFunction = subreddit.getRising.bind(subreddit);
-                break;
-            case 'controversial':
-                sortFunction = subreddit.getControversial.bind(subreddit);
-                break;
-            default:
-                throw new Error(`Invalid sort type: ${sortType}`);
-        }
-
-        if (
-            !['hour', 'day', 'week', 'month', 'year', 'all'].includes(sortTime)
-        ) {
-            throw new Error(`Invalid sort time: ${sortTime}`);
-        }
-
-        const dbConnect = db.getDb();
-        const submissionsCollection = dbConnect.collection(
-            config.submissionsCollection
-        );
-        sortFunction({ time: sortTime, limit: numSubmissions }).then((data) => {
-            Promise.all(
-                data.map((submission) => {
-                    if (submission.is_self) {
-                        return submission;
-                    }
-                    const query = { id: submission.id };
-                    const cursor = submissionsCollection.find(query);
-                    return cursor
-                        .count()
-                        .then((count) => {
-                            // console.log(`Found ${count} existing submissions for ${submission.id}: ${submission.title}`);
-                            if (count === 0) {
-                                const submissionPromise =
-                                    updateSubmissionMedia(submission);
-                                return submissionPromise.then(
-                                    (mediaSubmission) => {
-                                        mediaSubmission.lastUpdateTime =
-                                            new Date();
-                                        updateSubmissionInDb(mediaSubmission);
-                                        return mediaSubmission;
-                                    }
-                                );
-                            }
-                            if (count === 1) {
-                                return cursor
-                                    .next()
-                                    .then((dbSubmission) =>
-                                        updateOldSubmissionInDb(
-                                            submission,
-                                            dbSubmission
-                                        )
-                                    );
-                            }
-                            cursor.toArray().then((submissions) => {
-                                console.log(
-                                    'Duplicate submissions:',
-                                    submissions
-                                );
-                            });
-                            throw new Error(
-                                `Found ${count} submissions with same id ${submission.id}`
-                            );
-                        })
-                        .catch((err) => {
-                            console.log(
-                                `Error finding submission ${submission.id}:`,
-                                err
-                            );
-                        });
-                })
-            ).then((modifiedData) => {
-                res.send(modifiedData);
-            });
-        });
+    let sortFunction = null;
+    switch (sortType) {
+        case 'hot':
+            sortFunction = subreddit.getHot.bind(subreddit);
+            break;
+        case 'new':
+            sortFunction = subreddit.getNew.bind(subreddit);
+            break;
+        case 'top':
+            sortFunction = subreddit.getTop.bind(subreddit);
+            break;
+        case 'rising':
+            sortFunction = subreddit.getRising.bind(subreddit);
+            break;
+        case 'controversial':
+            sortFunction = subreddit.getControversial.bind(subreddit);
+            break;
+        default:
+            throw new Error(`Invalid sort type: ${sortType}`);
     }
-);
+
+    if (!['hour', 'day', 'week', 'month', 'year', 'all'].includes(sortTime)) {
+        throw new Error(`Invalid sort time: ${sortTime}`);
+    }
+
+    const dbConnect = db.getDb();
+    const submissionsCollection = dbConnect.collection(config.submissionsCollection);
+    sortFunction({ time: sortTime, limit: numSubmissions }).then((data) => {
+        Promise.all(
+            data.map((submission) => {
+                if (submission.is_self) {
+                    return submission;
+                }
+                const query = { id: submission.id };
+                const cursor = submissionsCollection.find(query);
+                return cursor
+                    .count()
+                    .then((count) => {
+                        // console.log(`Found ${count} existing submissions for ${submission.id}: ${submission.title}`);
+                        if (count === 0) {
+                            const submissionPromise = updateSubmissionMedia(submission);
+                            return submissionPromise.then((mediaSubmission) => {
+                                mediaSubmission.lastUpdateTime = new Date();
+                                updateSubmissionInDb(mediaSubmission);
+                                return mediaSubmission;
+                            });
+                        }
+                        if (count === 1) {
+                            return cursor.next().then((dbSubmission) => updateOldSubmissionInDb(submission, dbSubmission));
+                        }
+                        cursor.toArray().then((submissions) => {
+                            console.log('Duplicate submissions:', submissions);
+                        });
+                        throw new Error(`Found ${count} submissions with same id ${submission.id}`);
+                    })
+                    .catch((err) => {
+                        console.log(`Error finding submission ${submission.id}:`, err);
+                    });
+            })
+        ).then((modifiedData) => {
+            res.send(modifiedData);
+        });
+    });
+});
 
 module.exports = router;
