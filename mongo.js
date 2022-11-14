@@ -1,4 +1,5 @@
 const { MongoClient } = require('mongodb');
+const config = require('./config');
 
 const mongoConnectionString = 'mongodb+srv://SubscriptionsAdmin:CxPeLkJ2Hz8GZm@submissionsdata.r9zuj.mongodb.net/myFirstDatabase?retryWrites=true&w=majority';
 const client = new MongoClient(mongoConnectionString, {
@@ -6,17 +7,19 @@ const client = new MongoClient(mongoConnectionString, {
     useUnifiedTopology: true,
 });
 
-let connection;
+let database = null;
 module.exports = {
-    connectToMongo(callback) {
-        client.connect((err, db) => {
-            if (err || !db) {
-                console.log('MongoDB connection error', err);
-                return callback(err);
-            }
-            connection = db.db('SubmissionsData');
-            return callback();
-        });
+    async connectToMongo() {
+        const connection = await client.connect();
+        database = connection.db('SubmissionsData');
     },
-    getDb() { return connection; },
+    async getDb() {
+        if (database === null) {
+            await module.exports.connectToMongo();
+            console.log('Connected to MongoDB');
+            console.log('Config:', config);
+            database.collection(config.submissionsCollection).createIndex({ lastUpdateTime: 1 }, { expireAfterSeconds: config.minutesUntilDelete * 60 });
+        }
+        return database;
+    },
 };

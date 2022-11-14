@@ -197,8 +197,8 @@ function updateSubmissionMedia(submission) {
     });
 }
 
-function updateSubmissionInDb(submission) {
-    const dbConnect = db.getDb();
+async function updateSubmissionInDb(submission) {
+    const dbConnect = await db.getDb();
     const submissionObj = {
         lastUpdateTime: submission.lastUpdateTime,
         imageUrls: submission.imageUrls,
@@ -222,7 +222,7 @@ function updateSubmissionInDb(submission) {
         .catch((err) => console.log('Error inserting submission into database:', err));
 }
 
-function updateOldSubmissionInDb(snoowrapSubmission, dbSubmission) {
+async function updateOldSubmissionInDb(snoowrapSubmission, dbSubmission) {
     const newUpdateTime = new Date();
     if (hasProp(dbSubmission, 'lastUpdateTime')) {
         const oldUpdateTime = new Date(dbSubmission.lastUpdateTime);
@@ -230,9 +230,9 @@ function updateOldSubmissionInDb(snoowrapSubmission, dbSubmission) {
         const minsSinceUpdate = msSinceUpdate / 1000 / 60;
         if (minsSinceUpdate > config.minutesUntilUpdate) {
             console.log(`Updating ${minsSinceUpdate} minutes old submission ${snoowrapSubmission.id}`);
-            return updateSubmissionMedia(snoowrapSubmission).then((mediaSubmission) => {
+            return updateSubmissionMedia(snoowrapSubmission).then(async (mediaSubmission) => {
                 mediaSubmission.lastUpdateTime = newUpdateTime;
-                updateSubmissionInDb(mediaSubmission);
+                await updateSubmissionInDb(mediaSubmission);
                 return mediaSubmission;
             });
         }
@@ -242,13 +242,13 @@ function updateOldSubmissionInDb(snoowrapSubmission, dbSubmission) {
     dbSubmission.score = snoowrapSubmission.score;
     dbSubmission.upvote_ratio = snoowrapSubmission.upvote_ratio;
     dbSubmission.removed_by_category = snoowrapSubmission.removed_by_category;
-    updateSubmissionInDb(dbSubmission);
+    await updateSubmissionInDb(dbSubmission);
     return new Promise((resolve, reject) => {
         resolve(dbSubmission);
     });
 }
 
-router.get('/subreddit/:subredditName/:sortType/:sortTime/:numSubmissions', (req, res) => {
+router.get('/subreddit/:subredditName/:sortType/:sortTime/:numSubmissions', async (req, res) => {
     const { sortType, sortTime } = req.params;
     const numSubmissions = parseInt(req.params.numSubmissions, 10);
     const subreddit = reddit.getSubreddit(req.params.subredditName);
@@ -278,7 +278,7 @@ router.get('/subreddit/:subredditName/:sortType/:sortTime/:numSubmissions', (req
         throw new Error(`Invalid sort time: ${sortTime}`);
     }
 
-    const dbConnect = db.getDb();
+    const dbConnect = await db.getDb();
     const submissionsCollection = dbConnect.collection(config.submissionsCollection);
     sortFunction({ time: sortTime, limit: numSubmissions }).then((data) => {
         Promise.all(
@@ -294,14 +294,14 @@ router.get('/subreddit/:subredditName/:sortType/:sortTime/:numSubmissions', (req
                         // console.log(`Found ${count} existing submissions for ${submission.id}: ${submission.title}`);
                         if (count === 0) {
                             const submissionPromise = updateSubmissionMedia(submission);
-                            return submissionPromise.then((mediaSubmission) => {
+                            return submissionPromise.then(async (mediaSubmission) => {
                                 mediaSubmission.lastUpdateTime = new Date();
-                                updateSubmissionInDb(mediaSubmission);
+                                await updateSubmissionInDb(mediaSubmission);
                                 return mediaSubmission;
                             });
                         }
                         if (count === 1) {
-                            return cursor.next().then((dbSubmission) => updateOldSubmissionInDb(submission, dbSubmission));
+                            return cursor.next().then(async (dbSubmission) => await updateOldSubmissionInDb(submission, dbSubmission));
                         }
                         cursor.toArray().then((submissions) => {
                             console.log('Duplicate submissions:', submissions);
