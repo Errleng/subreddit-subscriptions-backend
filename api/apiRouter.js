@@ -208,7 +208,9 @@ async function updateSubmissionInDb(submission) {
         title: submission.title,
         score: submission.score,
         upvote_ratio: submission.upvote_ratio,
+        num_comments: submission.num_comments,
         removed_by_category: submission.removed_by_category,
+        created_utc: submission.created_utc,
     };
     const filter = { id: submissionObj.id };
     const updateDocument = { $set: submissionObj };
@@ -241,7 +243,9 @@ async function updateOldSubmissionInDb(snoowrapSubmission, dbSubmission) {
     }
     dbSubmission.score = snoowrapSubmission.score;
     dbSubmission.upvote_ratio = snoowrapSubmission.upvote_ratio;
+    dbSubmission.num_comments = snoowrapSubmission.num_comments;
     dbSubmission.removed_by_category = snoowrapSubmission.removed_by_category;
+    dbSubmission.created_utc = snoowrapSubmission.created_utc;
     await updateSubmissionInDb(dbSubmission);
     return new Promise((resolve, reject) => {
         resolve(dbSubmission);
