@@ -310,8 +310,8 @@ router.get('/subreddit/:subredditName/:sortType/:sortTime/:numSubmissions', asyn
                 }
                 const query = { id: submission.id };
                 const cursor = submissionsCollection.find(query);
-                return cursor
-                    .count()
+                return submissionsCollection
+                    .countDocuments(query)
                     .then((count) => {
                         // console.log(`Found ${count} existing submissions for ${submission.id}: ${submission.title}`);
                         if (count === 0) {
