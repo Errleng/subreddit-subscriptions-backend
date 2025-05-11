@@ -25,6 +25,34 @@ function isValidThumbnail(thumbnail) {
     return thumbnail.length > 0 && thumbnail !== 'default' && thumbnail !== 'nsfw';
 }
 
+function getGalleryImageUrls(submission) {
+    const imageUrls = [];
+    if (hasProp(submission, 'gallery_data')) {
+        const galleryImages = submission.gallery_data.items;
+        galleryImages.forEach((image) => {
+            const metadata = submission.media_metadata[image.media_id];
+            const previewImages = metadata.p;
+
+            if (previewImages === undefined) {
+                return;
+            }
+
+            let imagePreview;
+            if (previewImages.length > 0) {
+                const MAX_PREVIEW_RESOLUTION_INDEX = 3;
+                imagePreview = previewImages[Math.min(previewImages.length - 1, MAX_PREVIEW_RESOLUTION_INDEX)].u;
+            } else {
+                imagePreview = metadata.s.u;
+            }
+
+            imageUrls.push(imagePreview);
+        });
+    } else {
+        throw new Error(`Submission ${submission.url} has is_gallery (${submission.is_gallery}) but does not have gallery_data (${submission.gallery_data})`);
+    }
+    return imageUrls;
+}
+
 function getSubmissionPreviewImageUrls(submission) {
     const imageUrls = [];
 
@@ -45,29 +73,7 @@ function getSubmissionPreviewImageUrls(submission) {
             imageUrls.push(previewImage);
         }
     } else if (hasProp(submission, 'is_gallery') && submission.is_gallery) {
-        if (hasProp(submission, 'gallery_data')) {
-            const galleryImages = submission.gallery_data.items;
-            galleryImages.forEach((image) => {
-                const metadata = submission.media_metadata[image.media_id];
-                const previewImages = metadata.p;
-
-                if (previewImages === undefined) {
-                    return;
-                }
-
-                let imagePreview;
-                if (previewImages.length > 0) {
-                    const MAX_PREVIEW_RESOLUTION_INDEX = 3;
-                    imagePreview = previewImages[Math.min(previewImages.length - 1, MAX_PREVIEW_RESOLUTION_INDEX)].u;
-                } else {
-                    imagePreview = metadata.s.u;
-                }
-
-                imageUrls.push(imagePreview);
-            });
-        } else {
-            throw new Error(`Submission ${submission.url} has is_gallery (${submission.is_gallery}) but does not have gallery_data (${submission.gallery_data})`);
-        }
+        imageUrls.push(...getGalleryImageUrls(submission));
     } else if (hasProp(submission, 'thumbnail')) {
         if (isValidThumbnail(submission.thumbnail)) {
             imageUrls.push(submission.thumbnail);
@@ -209,9 +215,15 @@ async function updateSubmissionInDb(submission) {
         score: submission.score,
         upvote_ratio: submission.upvote_ratio,
         num_comments: submission.num_comments,
+        num_images: 0,
         removed_by_category: submission.removed_by_category,
         created_utc: submission.created_utc,
     };
+
+    if (hasProp(submission, 'is_gallery') && submission.is_gallery) {
+        submissionObj.num_images = getGalleryImageUrls(submission).length;
+    }
+
     const filter = { id: submissionObj.id };
     const updateDocument = { $set: submissionObj };
     const options = { upsert: true }; // create new document if does not exist
@@ -246,6 +258,12 @@ async function updateOldSubmissionInDb(snoowrapSubmission, dbSubmission) {
     dbSubmission.num_comments = snoowrapSubmission.num_comments;
     dbSubmission.removed_by_category = snoowrapSubmission.removed_by_category;
     dbSubmission.created_utc = snoowrapSubmission.created_utc;
+
+    dbSubmission.num_images = 0;
+    if (hasProp(snoowrapSubmission, 'is_gallery') && snoowrapSubmission.is_gallery) {
+        dbSubmission.num_images = getGalleryImageUrls(snoowrapSubmission).length;
+    }
+
     await updateSubmissionInDb(dbSubmission);
     return new Promise((resolve, reject) => {
         resolve(dbSubmission);
