@@ -31,6 +31,11 @@ function getGalleryImageUrls(submission) {
         const galleryImages = submission.gallery_data.items;
         galleryImages.forEach((image) => {
             const metadata = submission.media_metadata[image.media_id];
+            if (metadata === undefined) {
+                console.error(`Submission ${submission.id} has gallery image with ID ${image.media_id} that could not be found in media metadata: ${JSON.stringify(submission.media_metadata)}`);
+                return;
+            }
+
             const previewImages = metadata.p;
 
             if (previewImages === undefined) {
