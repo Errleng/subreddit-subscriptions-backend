@@ -311,21 +311,26 @@ router.get('/subreddit/:subredditName/:sortType/:sortTime/:numSubmissions', asyn
     const dbConnect = await db.getDb();
     const submissionsCollection = dbConnect.collection(config.submissionsCollection);
     let numAttempts = 0;
+
+    let longestData = [];
     while (true) {
         numAttempts++;
 
         const data = await sortFunction({ time: sortTime, limit: numSubmissions });
+        if (data.length > longestData.length) {
+            longestData = data;
+        }
         if (data.length < numSubmissions) {
             console.warn(`Retrieved only ${data.length} out of ${numSubmissions} submissions for ${subredditName}`);
-            if (numAttempts > MAX_ATTEMPTS) {
-                console.error(`Max attempts ${MAX_ATTEMPTS} reached for retrying fetching submissions from ${subredditName}. Will return latest API response.`);
-            } else {
+            if (numAttempts <= MAX_ATTEMPTS) {
                 continue;
+            } else {
+                console.error(`Max attempts ${MAX_ATTEMPTS} reached for retrying fetching submissions from ${subredditName}. Will return longest API response.`);
             }
         }
 
         const modifiedData = await Promise.all(
-            data.map((submission) => {
+            longestData.map((submission) => {
                 if (submission.is_self) {
                     return submission;
                 }
