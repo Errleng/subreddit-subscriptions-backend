@@ -27,6 +27,9 @@ const reddit = new snoowrap({
   clientSecret: secrets.clientSecret,
   refreshToken: secrets.refreshToken,
 });
-reddit.config({ requestDelay: 1000 });
+reddit.config({ 
+    requestDelay: 1000,
+    debug: true
+});
 
 module.exports = reddit;

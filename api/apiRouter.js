@@ -5,6 +5,8 @@ const reddit = require('../reddit');
 const config = require('../config');
 const db = require('../mongo');
 
+const MAX_ATTEMPTS = 10;
+
 router.get('/', (req, res) => {
     res.send('Subreddit Subscriptions API');
 });
@@ -278,7 +280,8 @@ async function updateOldSubmissionInDb(snoowrapSubmission, dbSubmission) {
 router.get('/subreddit/:subredditName/:sortType/:sortTime/:numSubmissions', async (req, res) => {
     const { sortType, sortTime } = req.params;
     const numSubmissions = parseInt(req.params.numSubmissions, 10);
-    const subreddit = reddit.getSubreddit(req.params.subredditName);
+    const subredditName = req.params.subredditName;
+    const subreddit = reddit.getSubreddit(subredditName);
 
     let sortFunction = null;
     switch (sortType) {
@@ -307,8 +310,28 @@ router.get('/subreddit/:subredditName/:sortType/:sortTime/:numSubmissions', asyn
 
     const dbConnect = await db.getDb();
     const submissionsCollection = dbConnect.collection(config.submissionsCollection);
-    sortFunction({ time: sortTime, limit: numSubmissions }).then((data) => {
-        Promise.all(
+    let prevNumSubmissionsRetrieved = -1;
+    let numAttempts = 0;
+    while (true) {
+        numAttempts++;
+        if (numAttempts > MAX_ATTEMPTS) {
+            console.error(`Max attempts ${MAX_ATTEMPTS} reached for fetching submissions from ${subredditName}`);
+            res.status(500).send({ error: `Could not fetch submissions from ${subredditName}` });
+            break;
+        }
+
+        const data = await sortFunction({ time: sortTime, limit: numSubmissions });
+        if (data.length < numSubmissions) {
+            console.warn(`Retrieved only ${data.length} out of ${numSubmissions} submissions for ${subredditName}${prevNumSubmissionsRetrieved !== -1 ? ` (previously retrieved ${prevNumSubmissionsRetrieved}) submissions` : ''}`);
+            if (data.length !== prevNumSubmissionsRetrieved) {
+                // Reddit API randomly returns empty list or a shorter than requested list
+                // Retry until the number stabilizes
+                prevNumSubmissionsRetrieved = data.length;
+                continue;
+            }
+        }
+
+        const modifiedData = await Promise.all(
             data.map((submission) => {
                 if (submission.is_self) {
                     return submission;
@@ -318,7 +341,6 @@ router.get('/subreddit/:subredditName/:sortType/:sortTime/:numSubmissions', asyn
                 return submissionsCollection
                     .countDocuments(query)
                     .then((count) => {
-                        // console.log(`Found ${count} existing submissions for ${submission.id}: ${submission.title}`);
                         if (count === 0) {
                             const submissionPromise = updateSubmissionMedia(submission);
                             return submissionPromise.then(async (mediaSubmission) => {
@@ -339,10 +361,12 @@ router.get('/subreddit/:subredditName/:sortType/:sortTime/:numSubmissions', asyn
                         console.log(`Error finding submission ${submission.id}:`, err);
                     });
             })
-        ).then((modifiedData) => {
-            res.send(modifiedData);
-        });
-    });
+        );
+
+        res.send(modifiedData);
+
+        break;
+    }
 });
 
 module.exports = router;
