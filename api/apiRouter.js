@@ -5,7 +5,7 @@ const reddit = require('../reddit');
 const config = require('../config');
 const db = require('../mongo');
 
-const MAX_ATTEMPTS = 10;
+const MAX_ATTEMPTS = 4;
 
 router.get('/', (req, res) => {
     res.send('Subreddit Subscriptions API');
@@ -310,7 +310,6 @@ router.get('/subreddit/:subredditName/:sortType/:sortTime/:numSubmissions', asyn
 
     const dbConnect = await db.getDb();
     const submissionsCollection = dbConnect.collection(config.submissionsCollection);
-    let prevNumSubmissionsRetrieved = -1;
     let numAttempts = 0;
     while (true) {
         numAttempts++;
@@ -322,13 +321,8 @@ router.get('/subreddit/:subredditName/:sortType/:sortTime/:numSubmissions', asyn
 
         const data = await sortFunction({ time: sortTime, limit: numSubmissions });
         if (data.length < numSubmissions) {
-            console.warn(`Retrieved only ${data.length} out of ${numSubmissions} submissions for ${subredditName}${prevNumSubmissionsRetrieved !== -1 ? ` (previously retrieved ${prevNumSubmissionsRetrieved}) submissions` : ''}`);
-            if (data.length !== prevNumSubmissionsRetrieved) {
-                // Reddit API randomly returns empty list or a shorter than requested list
-                // Retry until the number stabilizes
-                prevNumSubmissionsRetrieved = data.length;
-                continue;
-            }
+            console.warn(`Retrieved only ${data.length} out of ${numSubmissions} submissions for ${subredditName}`);
+            continue;
         }
 
         const modifiedData = await Promise.all(
