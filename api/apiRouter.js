@@ -313,16 +313,15 @@ router.get('/subreddit/:subredditName/:sortType/:sortTime/:numSubmissions', asyn
     let numAttempts = 0;
     while (true) {
         numAttempts++;
-        if (numAttempts > MAX_ATTEMPTS) {
-            console.error(`Max attempts ${MAX_ATTEMPTS} reached for fetching submissions from ${subredditName}`);
-            res.status(500).send({ error: `Could not fetch submissions from ${subredditName}` });
-            break;
-        }
 
         const data = await sortFunction({ time: sortTime, limit: numSubmissions });
         if (data.length < numSubmissions) {
             console.warn(`Retrieved only ${data.length} out of ${numSubmissions} submissions for ${subredditName}`);
-            continue;
+            if (numAttempts > MAX_ATTEMPTS) {
+                console.error(`Max attempts ${MAX_ATTEMPTS} reached for retrying fetching submissions from ${subredditName}. Will return latest API response.`);
+            } else {
+                continue;
+            }
         }
 
         const modifiedData = await Promise.all(
