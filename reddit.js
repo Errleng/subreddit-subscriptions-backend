@@ -22,7 +22,7 @@ if (secrets === null) {
 }
 
 const reddit = new snoowrap({
-    userAgent: 'subreddit subscriptions app deployed v1.0',
+    userAgent: 'personal user agent for personal app for accessibility',
     clientId: secrets.clientId,
     clientSecret: secrets.clientSecret,
     refreshToken: secrets.refreshToken,
