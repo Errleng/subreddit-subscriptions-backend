@@ -1,7 +1,10 @@
 const { MongoClient } = require('mongodb');
 const config = require('./config');
 
-const mongoConnectionString = 'mongodb+srv://SubscriptionsAdmin:CxPeLkJ2Hz8GZm@submissionsdata.r9zuj.mongodb.net/myFirstDatabase?retryWrites=true&w=majority';
+const mongoConnectionString = process.env.MONGODB_URI;
+if (!mongoConnectionString) {
+    throw new Error('MONGODB_URI is required. Set it in your environment or .env file.');
+}
 const client = new MongoClient(mongoConnectionString, {
     useNewUrlParser: true,
     useUnifiedTopology: true,
@@ -11,7 +14,7 @@ let database = null;
 module.exports = {
     async connectToMongo() {
         const connection = await client.connect();
-        database = connection.db('SubmissionsData');
+        database = connection.db(process.env.MONGODB_DATABASE || 'SubmissionsData');
     },
     async getDb() {
         if (database === null) {
