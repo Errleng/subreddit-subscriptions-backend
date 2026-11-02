@@ -216,20 +216,25 @@ function cachedMediaSatisfiesExpectedType(submission, cachedSubmission) {
         return false;
     }
 
-    if (Number.isInteger(cachedSubmission.num_images) && cachedSubmission.num_images > 0) {
-        const cachedImageUrls = Array.isArray(cachedSubmission.imageUrls) ? cachedSubmission.imageUrls : [];
-        return cachedImageUrls.length >= cachedSubmission.num_images;
-    }
+    const cachedImageUrls = Array.isArray(cachedSubmission.imageUrls) ? cachedSubmission.imageUrls : [];
+    const cachedImageCount = Number.isInteger(cachedSubmission.num_images) && cachedSubmission.num_images > 0
+        ? cachedSubmission.num_images
+        : cachedImageUrls.length;
+    const galleryItems = hasProp(submission, 'gallery_data') && Array.isArray(submission.gallery_data.items)
+        ? submission.gallery_data.items
+        : null;
+    const galleryExpected = isGallerySubmission(submission) || cachedImageCount > 0;
 
-    if (isGallerySubmission(submission)) {
-        const cachedImageUrls = Array.isArray(cachedSubmission.imageUrls) ? cachedSubmission.imageUrls : [];
-        const cachedImageCount = Number.isInteger(cachedSubmission.num_images) && cachedSubmission.num_images > 0
-            ? cachedSubmission.num_images
-            : cachedImageUrls.length;
+    if (galleryExpected) {
+        if (galleryItems !== null) {
+            return galleryItems.length > 0
+                ? cachedImageUrls.length >= galleryItems.length
+                : cachedImageUrls.length > 0;
+        }
         return cachedImageCount > 0 && cachedImageUrls.length >= cachedImageCount;
     }
     if (submission.post_hint === 'image') {
-        return Array.isArray(cachedSubmission.imageUrls) && cachedSubmission.imageUrls.length > 0;
+        return cachedImageUrls.length > 0;
     }
     if (submission.is_video === true || ['hosted:video', 'rich:video'].includes(submission.post_hint)) {
         return (typeof cachedSubmission.mediaVideo === 'string' && cachedSubmission.mediaVideo.length > 0)
@@ -380,6 +385,13 @@ async function updateOldSubmissionInDb(snoowrapSubmission, dbSubmission) {
         removed_by_category: snoowrapSubmission.removed_by_category,
         created_utc: snoowrapSubmission.created_utc,
     };
+    if (isGallerySubmission(snoowrapSubmission)
+        && hasProp(snoowrapSubmission, 'gallery_data')
+        && Array.isArray(snoowrapSubmission.gallery_data.items)
+        && snoowrapSubmission.gallery_data.items.length > 0) {
+        const cachedImageCount = Number.isInteger(dbSubmission.num_images) ? dbSubmission.num_images : 0;
+        updatedSubmission.num_images = Math.max(cachedImageCount, snoowrapSubmission.gallery_data.items.length);
+    }
 
     await updateSubmissionInDb(updatedSubmission);
     return updatedSubmission;
