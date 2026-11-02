@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "build": "node ./scripts/build.js",
+    "test": "node --test",
     "start": "node ./bin/www",
     "devstart": "set DEBUG=backend:* & nodemon ./bin/www"
   },

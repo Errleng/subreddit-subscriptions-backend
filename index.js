@@ -9,7 +9,7 @@ const app = express();
 
 const apiRouter = require('./api/apiRouter');
 
-app.use(cors());
+app.use(cors({ exposedHeaders: ['Retry-After'] }));
 app.use(logger('dev'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
