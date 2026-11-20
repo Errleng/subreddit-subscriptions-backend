@@ -19,6 +19,17 @@ const SORT_TIMES = /** @type {const} */ (['hour', 'day', 'week', 'month', 'year'
 
 class SubmissionMediaError extends Error {}
 
+/**
+ * Express 4 expects a synchronous handler and does not forward rejected promises.
+ * @param {(req: import('express').Request, res: import('express').Response) => Promise<void>} handler
+ * @returns {import('express').RequestHandler}
+ */
+function handleAsync(handler) {
+    return (req, res, next) => {
+        handler(req, res).catch(next);
+    };
+}
+
 function createRequestAbortController(req, res) {
     const controller = new AbortController();
     const abortIfDisconnected = () => {
@@ -105,7 +116,7 @@ router.get('/', (_req, res) => {
     res.send('Subreddit Subscriptions API');
 });
 
-router.get('/valid/subreddit/:subredditName', async (req, res) => {
+router.get('/valid/subreddit/:subredditName', handleAsync(async (req, res) => {
     const request = createRequestAbortController(req, res);
     try {
         await redditRequestScheduler.execute(
@@ -122,7 +133,7 @@ router.get('/valid/subreddit/:subredditName', async (req, res) => {
     } finally {
         request.cleanup();
     }
-});
+}));
 
 /**
  * @param {{ num_images?: number } | null} cachedSubmission
@@ -264,7 +275,7 @@ async function updateOldSubmissionInDb(snoowrapSubmission, dbSubmission, signal)
     return updatedSubmission;
 }
 
-router.get('/subreddit/:subredditName/:sortType/:sortTime/:numSubmissions', async (req, res) => {
+router.get('/subreddit/:subredditName/:sortType/:sortTime/:numSubmissions', handleAsync(async (req, res) => {
     const request = createRequestAbortController(req, res);
     const operationController = new AbortController();
     const abortOperations = () => operationController.abort();
@@ -372,6 +383,6 @@ router.get('/subreddit/:subredditName/:sortType/:sortTime/:numSubmissions', asyn
         request.signal.removeEventListener('abort', abortOperations);
         request.cleanup();
     }
-});
+}));
 
 module.exports = router;

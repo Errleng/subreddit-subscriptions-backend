@@ -9,7 +9,9 @@
     "devstart": "node --watch ./bin/www",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "typecheck": "tsc"
+    "typecheck": "tsc",
+    "lint": "oxlint .",
+    "lint:fix": "oxlint --fix ."
   },
   "dependencies": {
     "cookie-parser": "~1.4.4",
@@ -32,6 +34,8 @@
     "@types/morgan": "1.9.10",
     "@types/node": "26.6.6",
     "@vitest/coverage-v8": "5.1.1",
+    "oxlint": "1.94.0",
+    "oxlint-tsgolint": "7.0.2007",
     "typescript": "6.0.3",
     "vitest": "5.1.1"
   }

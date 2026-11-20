@@ -1,0 +1,17 @@
+{
+    "$schema": "./node_modules/oxlint/configuration_schema.json",
+    "options": {
+        "typeAware": true,
+        "denyWarnings": true,
+        "reportUnusedDisableDirectives": "error"
+    },
+    "plugins": ["typescript", "oxc", "unicorn"],
+    "categories": { "correctness": "error" },
+    "env": { "node": true, "es2024": true },
+    "ignorePatterns": ["coverage/**", "dist/**", "node_modules/**"],
+    "rules": {
+        "typescript/no-floating-promises": ["error", { "ignoreVoid": false }],
+        "typescript/no-misused-promises": "error",
+        "typescript/await-thenable": "error"
+    }
+}
