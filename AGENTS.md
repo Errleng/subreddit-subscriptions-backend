@@ -1,5 +1,12 @@
 # Coding agent guidance
 
+## Backend checks
+
+- Install the Node version in `.nvmrc` and use the lockfile with `npm ci`.
+- Run `npm run check` for the full check. Its build step checks runtime syntax, and TypeScript checks JavaScript and tests without emitting files.
+- Use `npm test` for Vitest and add tests in `test/*.test.mjs`. Use synthetic data and loopback HTTP with stubbed external services.
+- Run `npm run test:coverage` to see the V8 report and current coverage thresholds. See the README for setup and hook activation.
+
 ## Coding practices
 
 - Before introducing or changing test tooling or conventions, inspect the repository for an existing framework, custom runner, test scripts, or file layout. If you find an existing setup or cannot tell which convention to follow, pause before changing it and ask the user whether to keep it or migrate it. Follow a choice the user has already made.
