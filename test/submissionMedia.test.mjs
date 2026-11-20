@@ -1,10 +1,12 @@
-const assert = require('node:assert/strict');
-const { test } = require('node:test');
+import assert from 'node:assert/strict';
+import { test } from 'vitest';
+import media from '../api/submissionMedia.js';
+
 const {
     extractSubmissionMedia,
     cachedMediaSatisfiesExpectedType,
     mergeMediaWithCache,
-} = require('../api/submissionMedia');
+} = media;
 
 test('extracts every gallery image using each item media_id', () => {
     const submission = {

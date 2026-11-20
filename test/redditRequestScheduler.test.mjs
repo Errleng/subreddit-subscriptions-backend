@@ -1,12 +1,14 @@
-const assert = require('node:assert/strict');
-const { test } = require('node:test');
-const snoowrap = require('snoowrap');
+import assert from 'node:assert/strict';
+import { test } from 'vitest';
+import snoowrap from 'snoowrap';
+import scheduler from '../redditRequestScheduler.js';
+
 const {
     RedditRequestScheduler,
     RedditRateLimitError,
     RedditQueueOverloadError,
     RedditRequestAbortedError,
-} = require('../redditRequestScheduler');
+} = scheduler;
 
 function createRequester(rawRequest = async () => ({})) {
     return {
