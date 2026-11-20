@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
 import { test } from 'vitest';
 import snoowrap from 'snoowrap';
-import scheduler from '../redditRequestScheduler.js';
+
+const require = createRequire(import.meta.url);
+/** @type {typeof import('../redditRequestScheduler.js')} */
+const scheduler = require('../redditRequestScheduler.js');
 
 const {
     RedditRequestScheduler,
@@ -69,6 +73,9 @@ test('Snoowrap preserves its local RateLimitError when automatic retries are dis
         refreshToken: 'placeholder',
     });
     requester.config({ requestDelay: 0, maxRetryAttempts: 1 });
+    requester.rawRequest = async () => {
+        throw new Error('Unexpected network request');
+    };
     requester.ratelimitRemaining = 0;
     requester.ratelimitExpiration = Date.now() + 10000;
 
@@ -86,6 +93,9 @@ test('translates Snoowrap local quota exhaustion into a server cooldown error', 
         refreshToken: 'placeholder',
     });
     requester.config({ requestDelay: 0, maxRetryAttempts: 1 });
+    requester.rawRequest = async () => {
+        throw new Error('Unexpected network request');
+    };
     requester.ratelimitRemaining = 0;
     requester.ratelimitExpiration = Date.now() + 10000;
     const scheduler = new RedditRequestScheduler(requester);

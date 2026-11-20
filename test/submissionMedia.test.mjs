@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
 import { test } from 'vitest';
-import media from '../api/submissionMedia.js';
+
+const require = createRequire(import.meta.url);
+/** @type {typeof import('../api/submissionMedia.js')} */
+const media = require('../api/submissionMedia.js');
 
 const {
     extractSubmissionMedia,
