@@ -1,6 +1,7 @@
 import { once } from 'node:events';
-import { createServer } from 'node:http';
+import { createServer, get } from 'node:http';
 import Module, { createRequire } from 'node:module';
+import { text } from 'node:stream/consumers';
 import { afterAll, beforeAll, beforeEach, expect, test, vi } from 'vitest';
 
 const require = createRequire(import.meta.url);
@@ -72,18 +73,19 @@ beforeEach(() => {
     collection.updateOne.mockResolvedValue({});
 });
 
-function request(path) {
-    return fetch(`${origin}/api${path}`, { redirect: 'error' });
+async function request(path) {
+    const [response] = await once(get(`${origin}/api${path}`, { agent: false }), 'response');
+    return { status: response.statusCode, headers: response.headers, body: await text(response) };
 }
 
 test('serves the Express API and validates a subreddit', async () => {
     const root = await request('/');
     expect(root.status).toBe(200);
-    expect(await root.text()).toBe('Subreddit Subscriptions API');
+    expect(root.body).toBe('Subreddit Subscriptions API');
 
     const response = await request('/valid/subreddit/example');
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({});
+    expect(JSON.parse(response.body)).toEqual({});
     expect(getSubreddit).toHaveBeenCalledWith('example');
     expect(about).toHaveBeenCalledOnce();
 });
@@ -92,7 +94,7 @@ test('returns a public 404 for a missing subreddit', async () => {
     about.mockRejectedValue(Object.assign(new Error('Upstream response'), { statusCode: 404 }));
     const response = await request('/valid/subreddit/missing');
     expect(response.status).toBe(404);
-    expect(await response.json()).toEqual({ error: 'Subreddit not found' });
+    expect(JSON.parse(response.body)).toEqual({ error: 'Subreddit not found' });
 });
 
 test.each(['/subreddit/example/invalid/day/1', '/subreddit/example/top/invalid/1'])(
@@ -100,7 +102,7 @@ test.each(['/subreddit/example/invalid/day/1', '/subreddit/example/top/invalid/1
     async (path) => {
         const response = await request(path);
         expect(response.status).toBe(400);
-        await response.json();
+        expect(JSON.parse(response.body)).toEqual({ error: 'Reddit request failed' });
         expect(getTop).not.toHaveBeenCalled();
         expect(collection.find).not.toHaveBeenCalled();
     },
@@ -118,7 +120,7 @@ test('retries a short listing and saves extracted media for new posts', async ()
 
     const response = await request('/subreddit/example/top/day/2');
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject([textPost, { id: imagePost.id, imageUrls: [imageUrl] }]);
+    expect(JSON.parse(response.body)).toMatchObject([textPost, { id: imagePost.id, imageUrls: [imageUrl] }]);
     expect(getTop).toHaveBeenCalledTimes(2);
     expect(getTop).toHaveBeenCalledWith({ time: 'day', limit: 2 });
     expect(collection.updateOne).toHaveBeenCalledExactlyOnceWith(
@@ -136,7 +138,7 @@ test('uses cached media and refreshes metrics from the listing', async () => {
 
     const response = await request('/subreddit/example/top/day/1');
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject([{ id: cachedPost.id, score: 7, imageUrls: [imageUrl] }]);
+    expect(JSON.parse(response.body)).toMatchObject([{ id: cachedPost.id, score: 7, imageUrls: [imageUrl] }]);
     expect(collection.updateOne).toHaveBeenCalledExactlyOnceWith(
         { id: cachedPost.id },
         { $set: expect.objectContaining({ score: 7, imageUrls: [imageUrl] }) },
@@ -148,7 +150,7 @@ test('returns a public 504 when the upstream request times out', async () => {
     about.mockRejectedValue(Object.assign(new Error('Upstream timed out'), { code: 'ETIMEDOUT' }));
     const response = await request('/valid/subreddit/example');
     expect(response.status).toBe(504);
-    expect(await response.json()).toEqual({ error: 'Reddit request failed' });
+    expect(JSON.parse(response.body)).toEqual({ error: 'Reddit request failed' });
 });
 
 test('exposes the upstream cooldown and blocks new Reddit requests', async () => {
@@ -163,12 +165,71 @@ test('exposes the upstream cooldown and blocks new Reddit requests', async () =>
         for (const name of ['example', 'another']) {
             const response = await request(`/valid/subreddit/${name}`);
             expect(response.status).toBe(429);
-            expect(response.headers.get('Retry-After')).toBe('7');
-            expect(response.headers.get('Access-Control-Expose-Headers')).toBe('Retry-After');
-            expect(await response.json()).toEqual({ error: 'Reddit request failed' });
+            expect(response.headers['retry-after']).toBe('7');
+            expect(response.headers['access-control-expose-headers']).toBe('Retry-After');
+            expect(JSON.parse(response.body)).toEqual({ error: 'Reddit request failed' });
         }
         expect(about).toHaveBeenCalledOnce();
     } finally {
         scheduler.pausedUntil = 0;
     }
+});
+
+test('repairs missing gallery media from the submission detail', async () => {
+    const gallery = {
+        id: 'gallery1',
+        is_gallery: true,
+        gallery_data: { items: [{ media_id: 'first' }] },
+        score: 7,
+    };
+    const fetch = vi.fn().mockResolvedValue({
+        ...gallery,
+        score: 3,
+        media_metadata: { first: { s: { u: imageUrl } } },
+    });
+    getTop.mockResolvedValue([{ ...gallery, fetch }]);
+
+    const response = await request('/subreddit/example/top/day/1');
+
+    expect(response.status).toBe(200);
+    expect(JSON.parse(response.body)).toMatchObject([
+        { id: gallery.id, score: 7, imageUrls: [imageUrl], num_images: 1 },
+    ]);
+    expect(fetch).toHaveBeenCalledOnce();
+});
+
+test('reports missing media after a detail fetch also returns an incomplete gallery', async () => {
+    const gallery = { id: 'gallery1', is_gallery: true };
+    const fetch = vi.fn().mockResolvedValue(gallery);
+    getTop.mockResolvedValue([{ ...gallery, fetch }]);
+
+    const response = await request('/subreddit/example/top/day/1');
+
+    expect(response.status).toBe(502);
+    expect(JSON.parse(response.body)).toEqual({ error: expect.stringContaining('Could not extract expected media') });
+    expect(collection.updateOne).not.toHaveBeenCalled();
+});
+
+test('returns the longest listing when the retry budget runs out', async () => {
+    const posts = [
+        { id: 'text1', is_self: true },
+        { id: 'text2', is_self: true },
+    ];
+    getTop.mockResolvedValueOnce(posts).mockResolvedValue(posts.slice(0, 1));
+
+    const response = await request('/subreddit/example/top/day/3');
+
+    expect(response.status).toBe(200);
+    expect(JSON.parse(response.body)).toEqual(posts);
+    expect(getTop).toHaveBeenCalledTimes(5);
+});
+
+test('returns 500 when a post cache write fails', async () => {
+    getTop.mockResolvedValue([{ id: 'post1' }]);
+    collection.updateOne.mockRejectedValue(new Error('Fixture write failed'));
+
+    const response = await request('/subreddit/example/top/day/1');
+
+    expect(response.status).toBe(500);
+    expect(JSON.parse(response.body)).toEqual({ error: 'Reddit request failed' });
 });
