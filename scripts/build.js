@@ -3,7 +3,7 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const projectRoot = path.resolve(__dirname, '..');
-const ignoredDirectories = new Set(['.git', 'node_modules']);
+const ignoredDirectories = new Set(['.git', 'coverage', 'dist', 'node_modules']);
 const javascriptFiles = [];
 
 function collectJavaScriptFiles(directory) {
