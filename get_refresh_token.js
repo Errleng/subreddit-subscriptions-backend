@@ -10,7 +10,7 @@ const app = express();
 
 let secrets = null;
 try {
-    secrets = fs.readFileSync(secretsPath);
+    secrets = fs.readFileSync(secretsPath, 'utf8');
 } catch (err) {
     if (err.code !== 'ENOENT') {
         console.error('Error when reading secrets file', err);
@@ -47,7 +47,7 @@ console.log('================================================================\n'
 app.get('/', (req, res) => {
     const code = req.query.code;
 
-    if (!code) {
+    if (typeof code !== 'string' || !code) {
         return res.send('No code found in the query parameters.');
     }
 

@@ -53,7 +53,7 @@ function parseRetryAfter(value, now = Date.now()) {
         return Math.max(1, Math.ceil(seconds));
     }
 
-    const retryAt = Date.parse(value);
+    const retryAt = Date.parse(String(value));
     if (!Number.isNaN(retryAt) && retryAt > now) {
         return Math.max(1, Math.ceil((retryAt - now) / 1000));
     }
@@ -72,6 +72,11 @@ function createAbortError() {
     return new RedditRequestAbortedError();
 }
 
+/**
+ * @param {number} milliseconds
+ * @param {AbortSignal | null} [signal]
+ * @returns {Promise<void>}
+ */
 function delay(milliseconds, signal) {
     if (milliseconds <= 0) {
         return Promise.resolve();
@@ -147,8 +152,8 @@ class RedditRequestScheduler {
                 reject,
                 started: false,
                 settled: false,
-                expirationTimer: null,
-                abortHandler: null,
+                expirationTimer: /** @type {NodeJS.Timeout | null} */ (null),
+                abortHandler: /** @type {(() => void) | null} */ (null),
             };
 
             if (signal) {

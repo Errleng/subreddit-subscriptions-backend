@@ -51,7 +51,11 @@ beforeAll(async () => {
     server = createServer(loadApp());
     server.listen(0, '127.0.0.1');
     await once(server, 'listening');
-    origin = `http://127.0.0.1:${server.address().port}`;
+    const address = server.address();
+    if (address === null || typeof address === 'string') {
+        throw new Error('Expected a TCP address for the test server');
+    }
+    origin = `http://127.0.0.1:${address.port}`;
 });
 
 afterAll(async () => {

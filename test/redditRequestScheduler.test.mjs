@@ -14,21 +14,12 @@ const {
     RedditRequestAbortedError,
 } = scheduler;
 
+/** @param {(options: { timeout?: number }) => Promise<unknown>} [rawRequest] */
 function createRequester(rawRequest = async () => ({})) {
     return {
-        ratelimitExpiration: null,
+        ratelimitExpiration: /** @type {number | null} */ (null),
         rawRequest,
     };
-}
-
-function deferred() {
-    let resolve;
-    let reject;
-    const promise = new Promise((resolvePromise, rejectPromise) => {
-        resolve = resolvePromise;
-        reject = rejectPromise;
-    });
-    return { promise, resolve, reject };
 }
 
 test('runs queued operations FIFO and spaces outbound requests', async () => {
@@ -62,7 +53,7 @@ test('a local Snoowrap rate-limit error pauses and rejects queued work', async (
         && error.statusCode === 429
         && error.retryAfterSeconds >= 1);
     await assert.rejects(second, (error) => error instanceof RedditRateLimitError && error.statusCode === 429);
-    await assert.rejects(scheduler.execute(() => Promise.resolve('blocked')), (error) => error.statusCode === 429);
+    await assert.rejects(scheduler.execute(() => Promise.resolve('blocked')), (error) => error instanceof RedditRateLimitError && error.statusCode === 429);
 });
 
 test('Snoowrap preserves its local RateLimitError when automatic retries are disabled', async () => {
@@ -79,7 +70,7 @@ test('Snoowrap preserves its local RateLimitError when automatic retries are dis
     requester.ratelimitRemaining = 0;
     requester.ratelimitExpiration = Date.now() + 10000;
 
-    await assert.rejects(Promise.resolve(requester.getSubreddit('example').fetch()), (error) => {
+    await assert.rejects(Promise.resolve(/** @type {PromiseLike<unknown>} */ (requester.getSubreddit('example').fetch())), (error) => {
         assert.ok(error instanceof snoowrap.errors.RateLimitError);
         return true;
     });
@@ -110,9 +101,10 @@ test('translates Snoowrap local quota exhaustion into a server cooldown error', 
 
 test('uses an upstream Retry-After header for cooldown duration', async () => {
     const scheduler = new RedditRequestScheduler(createRequester());
-    const upstreamError = new Error('Too many requests');
-    upstreamError.statusCode = 429;
-    upstreamError.response = { headers: { 'retry-after': '7' } };
+    const upstreamError = Object.assign(new Error('Too many requests'), {
+        statusCode: 429,
+        response: { headers: { 'retry-after': '7' } },
+    });
 
     await assert.rejects(scheduler.execute(() => Promise.reject(upstreamError)), (error) => {
         assert.ok(error instanceof RedditRateLimitError);
@@ -122,7 +114,7 @@ test('uses an upstream Retry-After header for cooldown duration', async () => {
 });
 
 test('rejects new work when the pending queue is full', async () => {
-    const inFlight = deferred();
+    const inFlight = Promise.withResolvers();
     const scheduler = new RedditRequestScheduler(createRequester(), { maxPendingRequests: 1 });
     const active = scheduler.execute(() => inFlight.promise);
     const pending = scheduler.execute(() => Promise.resolve('second'));
@@ -139,7 +131,7 @@ test('rejects new work when the pending queue is full', async () => {
 });
 
 test('expires queued work that waits too long and removes it from the queue', async () => {
-    const inFlight = deferred();
+    const inFlight = Promise.withResolvers();
     const scheduler = new RedditRequestScheduler(createRequester(), { maxQueueWaitMs: 20 });
     const active = scheduler.execute(() => inFlight.promise);
     const pending = scheduler.execute(() => Promise.resolve('expired'));
@@ -151,7 +143,7 @@ test('expires queued work that waits too long and removes it from the queue', as
 });
 
 test('removes queued work when its request is aborted', async () => {
-    const inFlight = deferred();
+    const inFlight = Promise.withResolvers();
     const scheduler = new RedditRequestScheduler(createRequester());
     const active = scheduler.execute(() => inFlight.promise);
     const controller = new AbortController();
@@ -165,7 +157,7 @@ test('removes queued work when its request is aborted', async () => {
 });
 
 test('does not dispatch another operation until an aborted in-flight call settles', async () => {
-    const inFlight = deferred();
+    const inFlight = Promise.withResolvers();
     const scheduler = new RedditRequestScheduler(createRequester());
     const controller = new AbortController();
     let nextStarted = false;

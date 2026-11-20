@@ -5,10 +5,7 @@ const mongoConnectionString = process.env.MONGODB_URI;
 if (!mongoConnectionString) {
     throw new Error('MONGODB_URI is required. Set it in your environment or .env file.');
 }
-const client = new MongoClient(mongoConnectionString, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-});
+const client = new MongoClient(mongoConnectionString);
 
 let database = null;
 module.exports = {

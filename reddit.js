@@ -4,7 +4,7 @@ const fs = require('fs');
 const secretsPath = './secrets.json';
 let secrets = null;
 try {
-    secrets = fs.readFileSync(secretsPath);
+    secrets = fs.readFileSync(secretsPath, 'utf8');
 } catch (err) {
     if (err.code !== 'ENOENT') {
         console.error('Error when reading secrets file', err);
@@ -41,9 +41,12 @@ reddit.config({
 // Snoowrap applies requestTimeout to authenticated API calls, but not to the
 // credentialed request it uses to refresh an OAuth access token.
 const rawRequest = reddit.rawRequest.bind(reddit);
-reddit.rawRequest = (options) => rawRequest({
-    ...options,
-    timeout: options.timeout ?? requestTimeoutMs,
+Object.assign(reddit, {
+    /** @type {typeof rawRequest} */
+    rawRequest: (options) => rawRequest({
+        ...options,
+        timeout: options.timeout ?? requestTimeoutMs,
+    }),
 });
 
 module.exports = reddit;

@@ -15,6 +15,7 @@ const {
 } = require('./submissionMedia');
 
 const MAX_ATTEMPTS = 4;
+const SORT_TIMES = /** @type {const} */ (['hour', 'day', 'week', 'month', 'year', 'all']);
 
 class SubmissionMediaError extends Error {}
 
@@ -100,7 +101,7 @@ function throwIfRequestAborted(signal) {
     }
 }
 
-router.get('/', (req, res) => {
+router.get('/', (_req, res) => {
     res.send('Subreddit Subscriptions API');
 });
 
@@ -123,10 +124,13 @@ router.get('/valid/subreddit/:subredditName', async (req, res) => {
     }
 });
 
+/**
+ * @param {{ num_images?: number } | null} cachedSubmission
+ */
 async function updateSubmissionMedia(submission, cachedSubmission = null, signal) {
     const startTime = performance.now();
     const galleryExpected = isGallerySubmission(submission)
-        || (cachedSubmission && Number.isInteger(cachedSubmission.num_images) && cachedSubmission.num_images > 0);
+        || (cachedSubmission !== null && Number.isInteger(cachedSubmission.num_images) && (cachedSubmission.num_images ?? 0) > 0);
     let sourceSubmission = submission;
     let mediaData;
     let extractionError = null;
@@ -221,7 +225,7 @@ async function updateOldSubmissionInDb(snoowrapSubmission, dbSubmission, signal)
 
     if (hasProp(dbSubmission, 'lastUpdateTime')) {
         const oldUpdateTime = new Date(dbSubmission.lastUpdateTime);
-        const msSinceUpdate = newUpdateTime - oldUpdateTime;
+        const msSinceUpdate = newUpdateTime.getTime() - oldUpdateTime.getTime();
         const minsSinceUpdate = msSinceUpdate / 1000 / 60;
         isStale = minsSinceUpdate > config.minutesUntilUpdate;
         if (isStale) {
@@ -267,7 +271,8 @@ router.get('/subreddit/:subredditName/:sortType/:sortTime/:numSubmissions', asyn
     request.signal.addEventListener('abort', abortOperations, { once: true });
 
     try {
-        const { sortType, sortTime } = req.params;
+        const { sortType } = req.params;
+        const sortTime = SORT_TIMES.find((time) => time === req.params.sortTime);
         const numSubmissions = parseInt(req.params.numSubmissions, 10);
         const subredditName = req.params.subredditName;
         const subreddit = reddit.getSubreddit(subredditName);
@@ -290,17 +295,14 @@ router.get('/subreddit/:subredditName/:sortType/:sortTime/:numSubmissions', asyn
                 sortFunction = subreddit.getControversial.bind(subreddit);
                 break;
             default: {
-                const error = new Error(`Invalid sort type: ${sortType}`);
-                error.statusCode = 400;
-                throw error;
+                throw Object.assign(new Error(`Invalid sort type: ${sortType}`), { statusCode: 400 });
             }
         }
 
-        if (!['hour', 'day', 'week', 'month', 'year', 'all'].includes(sortTime)) {
-            const error = new Error(`Invalid sort time: ${sortTime}`);
-            error.statusCode = 400;
-            throw error;
+        if (sortTime === undefined) {
+            throw Object.assign(new Error(`Invalid sort time: ${req.params.sortTime}`), { statusCode: 400 });
         }
+        const listingOptions = { time: sortTime, limit: numSubmissions };
 
         const dbConnect = await db.getDb();
         const submissionsCollection = dbConnect.collection(config.submissionsCollection);
@@ -310,7 +312,7 @@ router.get('/subreddit/:subredditName/:sortType/:sortTime/:numSubmissions', asyn
         while (true) {
             numAttempts++;
             const data = await redditRequestScheduler.execute(
-                () => sortFunction({ time: sortTime, limit: numSubmissions }),
+                () => sortFunction({ ...listingOptions }),
                 { signal: operationController.signal },
             );
             if (data.length > longestData.length) {
