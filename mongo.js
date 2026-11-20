@@ -7,19 +7,31 @@ if (!mongoConnectionString) {
 }
 const client = new MongoClient(mongoConnectionString);
 
-let database = null;
+/** @type {Promise<import('mongodb').Db> | null} */
+let initialization = null;
+
+async function initializeDatabase() {
+    const connection = await client.connect();
+    const database = connection.db(process.env.MONGODB_DATABASE || 'SubmissionsData');
+    await database.collection(config.submissionsCollection).createIndex(
+        { lastUpdateTime: 1 },
+        { expireAfterSeconds: config.minutesUntilDelete * 60 },
+    );
+    console.log('Connected to MongoDB');
+    return database;
+}
+
+function getDb() {
+    initialization ??= initializeDatabase().catch((error) => {
+        initialization = null;
+        throw error;
+    });
+    return initialization;
+}
+
 module.exports = {
     async connectToMongo() {
-        const connection = await client.connect();
-        database = connection.db(process.env.MONGODB_DATABASE || 'SubmissionsData');
+        await getDb();
     },
-    async getDb() {
-        if (database === null) {
-            await module.exports.connectToMongo();
-            console.log('Connected to MongoDB');
-            console.log('Config:', config);
-            database.collection(config.submissionsCollection).createIndex({ lastUpdateTime: 1 }, { expireAfterSeconds: config.minutesUntilDelete * 60 });
-        }
-        return database;
-    },
+    getDb,
 };
