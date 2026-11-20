@@ -60,7 +60,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
     if (server?.listening) {
-        await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve(undefined)));
+        await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve(undefined))));
     }
 });
 
@@ -153,10 +153,12 @@ test('returns a public 504 when the upstream request times out', async () => {
 
 test('exposes the upstream cooldown and blocks new Reddit requests', async () => {
     const scheduler = require('../redditRequestSchedulerInstance');
-    about.mockRejectedValue(Object.assign(new Error('Upstream quota exhausted'), {
-        statusCode: 429,
-        response: { headers: { 'Retry-After': '7' } },
-    }));
+    about.mockRejectedValue(
+        Object.assign(new Error('Upstream quota exhausted'), {
+            statusCode: 429,
+            response: { headers: { 'Retry-After': '7' } },
+        }),
+    );
     try {
         for (const name of ['example', 'another']) {
             const response = await request(`/valid/subreddit/${name}`);

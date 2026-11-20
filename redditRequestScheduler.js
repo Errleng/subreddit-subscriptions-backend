@@ -62,10 +62,11 @@ function parseRetryAfter(value, now = Date.now()) {
 }
 
 function isRateLimitError(error) {
-    return error instanceof RedditRateLimitError
-        || error instanceof snoowrap.errors.RateLimitError
-        || (error && (error.statusCode === 429
-            || (error.response && error.response.statusCode === 429)));
+    return (
+        error instanceof RedditRateLimitError ||
+        error instanceof snoowrap.errors.RateLimitError ||
+        (error && (error.statusCode === 429 || (error.response && error.response.statusCode === 429)))
+    );
 }
 
 function createAbortError() {
@@ -122,11 +123,13 @@ class RedditRequestScheduler {
         this.pausedUntil = 0;
 
         const rawRequest = this.reddit.rawRequest.bind(this.reddit);
-        this.reddit.rawRequest = (requestOptions) => this.beforeRedditRequest()
-            .then(() => rawRequest({
-                ...requestOptions,
-                timeout: requestOptions.timeout ?? 30000,
-            }));
+        this.reddit.rawRequest = (requestOptions) =>
+            this.beforeRedditRequest().then(() =>
+                rawRequest({
+                    ...requestOptions,
+                    timeout: requestOptions.timeout ?? 30000,
+                }),
+            );
     }
 
     execute(operation, options = {}) {
@@ -253,18 +256,12 @@ class RedditRequestScheduler {
     startCooldown(cause) {
         const now = Date.now();
         const headerDelay = parseRetryAfter(getRetryAfterHeader(cause), now);
-        const resetDelay = this.reddit.ratelimitExpiration > now
-            ? Math.ceil((this.reddit.ratelimitExpiration - now) / 1000)
-            : null;
-        const retryAfterSeconds = headerDelay
-            || resetDelay
-            || DEFAULT_RATE_LIMIT_RETRY_AFTER_SECONDS;
+        const resetDelay =
+            this.reddit.ratelimitExpiration > now ? Math.ceil((this.reddit.ratelimitExpiration - now) / 1000) : null;
+        const retryAfterSeconds = headerDelay || resetDelay || DEFAULT_RATE_LIMIT_RETRY_AFTER_SECONDS;
 
         this.pausedUntil = Math.max(this.pausedUntil, now + retryAfterSeconds * 1000);
-        return new RedditRateLimitError(
-            Math.max(1, Math.ceil((this.pausedUntil - now) / 1000)),
-            cause,
-        );
+        return new RedditRateLimitError(Math.max(1, Math.ceil((this.pausedUntil - now) / 1000)), cause);
     }
 
     getCooldownError() {

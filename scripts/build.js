@@ -17,7 +17,10 @@ function collectJavaScriptFiles(directory) {
         const entryPath = path.join(directory, entry.name);
         if (entry.isDirectory()) {
             collectJavaScriptFiles(entryPath);
-        } else if (entry.isFile() && (/\.[cm]?js$/.test(entry.name) || entryPath === path.join(projectRoot, 'bin', 'www'))) {
+        } else if (
+            entry.isFile() &&
+            (/\.[cm]?js$/.test(entry.name) || entryPath === path.join(projectRoot, 'bin', 'www'))
+        ) {
             javascriptFiles.push(entryPath);
         }
     });

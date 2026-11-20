@@ -13,10 +13,9 @@ let initialization = null;
 async function initializeDatabase() {
     const connection = await client.connect();
     const database = connection.db(process.env.MONGODB_DATABASE || 'SubmissionsData');
-    await database.collection(config.submissionsCollection).createIndex(
-        { lastUpdateTime: 1 },
-        { expireAfterSeconds: config.minutesUntilDelete * 60 },
-    );
+    await database
+        .collection(config.submissionsCollection)
+        .createIndex({ lastUpdateTime: 1 }, { expireAfterSeconds: config.minutesUntilDelete * 60 });
     console.log('Connected to MongoDB');
     return database;
 }

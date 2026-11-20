@@ -21,7 +21,7 @@ if (secrets === null) {
     secrets = {
         clientId: process.env.REDDIT_CLIENT,
         clientSecret: process.env.REDDIT_SECRET,
-        refreshToken: process.env.REDDIT_REFRESH_TOKEN
+        refreshToken: process.env.REDDIT_REFRESH_TOKEN,
     };
 } else {
     secrets = JSON.parse(secrets);
@@ -35,7 +35,7 @@ const authUrl = snoowrap.getAuthUrl({
     scope: ['*'],
     redirectUri: REDIRECT_URI,
     permanent: true, // Crucial to get a refresh token back
-    state: 'etnhaetsahetsnhaoslolasoh'
+    state: 'etnhaetsahetsnhaoslolasoh',
 });
 
 console.log('\n================================================================');
@@ -51,25 +51,28 @@ app.get('/', (req, res) => {
         return res.send('No code found in the query parameters.');
     }
 
-    snoowrap.fromAuthCode({
-        code: code,
-        clientId: secrets.clientId,
-        clientSecret: secrets.clientSecret,
-        redirectUri: REDIRECT_URI,
-        userAgent: 'personal user agent for personal app for accessibility'
-    }).then(requester => {
-        console.log('\n================ SUCCESS! ================');
-        console.log('Your NEW Refresh Token is:\n');
-        console.log(requester.refreshToken);
-        console.log('\nSave this to your REDDIT_REFRESH_TOKEN environment variable!');
-        console.log('==========================================\n');
+    snoowrap
+        .fromAuthCode({
+            code: code,
+            clientId: secrets.clientId,
+            clientSecret: secrets.clientSecret,
+            redirectUri: REDIRECT_URI,
+            userAgent: 'personal user agent for personal app for accessibility',
+        })
+        .then((requester) => {
+            console.log('\n================ SUCCESS! ================');
+            console.log('Your NEW Refresh Token is:\n');
+            console.log(requester.refreshToken);
+            console.log('\nSave this to your REDDIT_REFRESH_TOKEN environment variable!');
+            console.log('==========================================\n');
 
-        res.send('Successfully authenticated! Check your terminal console for the refresh token.');
-        process.exit(0);
-    }).catch(err => {
-        console.error('Error exchanging authorization code:', err);
-        res.status(500).send('Authentication failed.');
-    });
+            res.send('Successfully authenticated! Check your terminal console for the refresh token.');
+            process.exit(0);
+        })
+        .catch((err) => {
+            console.error('Error exchanging authorization code:', err);
+            res.status(500).send('Authentication failed.');
+        });
 });
 
 app.listen(PORT, () => {

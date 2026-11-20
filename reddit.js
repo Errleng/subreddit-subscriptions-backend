@@ -15,7 +15,7 @@ if (secrets === null) {
     secrets = {
         clientId: process.env.REDDIT_CLIENT,
         clientSecret: process.env.REDDIT_SECRET,
-        refreshToken: process.env.REDDIT_REFRESH_TOKEN
+        refreshToken: process.env.REDDIT_REFRESH_TOKEN,
     };
 } else {
     secrets = JSON.parse(secrets);
@@ -43,10 +43,11 @@ reddit.config({
 const rawRequest = reddit.rawRequest.bind(reddit);
 Object.assign(reddit, {
     /** @type {typeof rawRequest} */
-    rawRequest: (options) => rawRequest({
-        ...options,
-        timeout: options.timeout ?? requestTimeoutMs,
-    }),
+    rawRequest: (options) =>
+        rawRequest({
+            ...options,
+            timeout: options.timeout ?? requestTimeoutMs,
+        }),
 });
 
 module.exports = reddit;

@@ -6,11 +6,7 @@ const require = createRequire(import.meta.url);
 /** @type {typeof import('../api/submissionMedia.js')} */
 const media = require('../api/submissionMedia.js');
 
-const {
-    extractSubmissionMedia,
-    cachedMediaSatisfiesExpectedType,
-    mergeMediaWithCache,
-} = media;
+const { extractSubmissionMedia, cachedMediaSatisfiesExpectedType, mergeMediaWithCache } = media;
 
 test('extracts every gallery image using each item media_id', () => {
     const submission = {
@@ -27,10 +23,7 @@ test('extracts every gallery image using each item media_id', () => {
     };
 
     assert.deepEqual(extractSubmissionMedia(submission), {
-        imageUrls: [
-            'https://images.example/first.jpg',
-            'https://images.example/second.jpg',
-        ],
+        imageUrls: ['https://images.example/first.jpg', 'https://images.example/second.jpg'],
         mediaVideo: null,
         mediaHtml: null,
         num_images: 2,
@@ -42,15 +35,17 @@ test('extracts a suitable preview URL for an image submission', () => {
         id: 'image1',
         post_hint: 'image',
         preview: {
-            images: [{
-                resolutions: [
-                    { url: 'https://images.example/small.jpg' },
-                    { url: 'https://images.example/medium.jpg' },
-                    { url: 'https://images.example/large.jpg' },
-                    { url: 'https://images.example/preview.jpg' },
-                ],
-                source: { url: 'https://images.example/original.jpg' },
-            }],
+            images: [
+                {
+                    resolutions: [
+                        { url: 'https://images.example/small.jpg' },
+                        { url: 'https://images.example/medium.jpg' },
+                        { url: 'https://images.example/large.jpg' },
+                        { url: 'https://images.example/preview.jpg' },
+                    ],
+                    source: { url: 'https://images.example/original.jpg' },
+                },
+            ],
         },
     };
 
@@ -90,10 +85,7 @@ test('checks gallery cache against the current item count and preserves fuller c
         num_images: 1,
     };
     const fullCache = {
-        imageUrls: [
-            'https://images.example/first.jpg',
-            'https://images.example/second.jpg',
-        ],
+        imageUrls: ['https://images.example/first.jpg', 'https://images.example/second.jpg'],
         num_images: 2,
     };
 

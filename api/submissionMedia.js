@@ -1,11 +1,13 @@
 const MAX_PREVIEW_RESOLUTION_INDEX = 3;
 
 function hasProp(object, propertyName) {
-    return object !== null
-        && typeof object === 'object'
-        && Object.prototype.hasOwnProperty.call(object, propertyName)
-        && object[propertyName] !== null
-        && object[propertyName] !== undefined;
+    return (
+        object !== null &&
+        typeof object === 'object' &&
+        Object.prototype.hasOwnProperty.call(object, propertyName) &&
+        object[propertyName] !== null &&
+        object[propertyName] !== undefined
+    );
 }
 
 function isValidThumbnail(thumbnail) {
@@ -31,7 +33,11 @@ function getGalleryImageUrls(submission, galleryExpected = false) {
     }
 
     const context = `Gallery submission ${submission.id} (${submission.url})`;
-    if (!hasProp(submission, 'gallery_data') || !Array.isArray(submission.gallery_data.items) || submission.gallery_data.items.length === 0) {
+    if (
+        !hasProp(submission, 'gallery_data') ||
+        !Array.isArray(submission.gallery_data.items) ||
+        submission.gallery_data.items.length === 0
+    ) {
         throw new Error(`${context} is expected to have gallery_data.items but none were returned`);
     }
     if (!hasProp(submission, 'media_metadata') || typeof submission.media_metadata !== 'object') {
@@ -152,15 +158,29 @@ function getExpectedMediaError(expectedSubmission, mediaSubmission, mediaData, g
         } catch (error) {
             return error;
         }
-        return new Error(`Gallery submission ${expectedSubmission.id} (${expectedSubmission.url}) has no gallery images`);
+        return new Error(
+            `Gallery submission ${expectedSubmission.id} (${expectedSubmission.url}) has no gallery images`,
+        );
     }
 
-    if (expectedSubmission.post_hint === 'image' && (!Array.isArray(mediaData.imageUrls) || mediaData.imageUrls.length === 0)) {
-        return new Error(`Image submission ${expectedSubmission.id} (${expectedSubmission.url}) has no image media data`);
+    if (
+        expectedSubmission.post_hint === 'image' &&
+        (!Array.isArray(mediaData.imageUrls) || mediaData.imageUrls.length === 0)
+    ) {
+        return new Error(
+            `Image submission ${expectedSubmission.id} (${expectedSubmission.url}) has no image media data`,
+        );
     }
 
-    if ((expectedSubmission.is_video === true || ['hosted:video', 'rich:video'].includes(expectedSubmission.post_hint)) && !mediaData.mediaVideo && !mediaData.mediaHtml) {
-        return new Error(`Video submission ${expectedSubmission.id} (${expectedSubmission.url}) has no video or embed metadata`);
+    if (
+        (expectedSubmission.is_video === true ||
+            ['hosted:video', 'rich:video'].includes(expectedSubmission.post_hint)) &&
+        !mediaData.mediaVideo &&
+        !mediaData.mediaHtml
+    ) {
+        return new Error(
+            `Video submission ${expectedSubmission.id} (${expectedSubmission.url}) has no video or embed metadata`,
+        );
     }
 
     return null;
@@ -172,7 +192,9 @@ function extractSubmissionMedia(submission, galleryExpected = false) {
     const mediaData = {
         imageUrls: isGallery
             ? getGalleryImageUrls(submission, true)
-            : (mediaObject === null ? getSubmissionPreviewImageUrls(submission) : []),
+            : mediaObject === null
+              ? getSubmissionPreviewImageUrls(submission)
+              : [],
         mediaVideo: null,
         mediaHtml: null,
         num_images: isGallery ? submission.gallery_data.items.length : 0,
@@ -195,19 +217,19 @@ function cachedMediaSatisfiesExpectedType(submission, cachedSubmission) {
     }
 
     const cachedImageUrls = Array.isArray(cachedSubmission.imageUrls) ? cachedSubmission.imageUrls : [];
-    const cachedImageCount = Number.isInteger(cachedSubmission.num_images) && cachedSubmission.num_images > 0
-        ? cachedSubmission.num_images
-        : cachedImageUrls.length;
-    const galleryItems = hasProp(submission, 'gallery_data') && Array.isArray(submission.gallery_data.items)
-        ? submission.gallery_data.items
-        : null;
+    const cachedImageCount =
+        Number.isInteger(cachedSubmission.num_images) && cachedSubmission.num_images > 0
+            ? cachedSubmission.num_images
+            : cachedImageUrls.length;
+    const galleryItems =
+        hasProp(submission, 'gallery_data') && Array.isArray(submission.gallery_data.items)
+            ? submission.gallery_data.items
+            : null;
     const galleryExpected = isGallerySubmission(submission) || cachedImageCount > 0;
 
     if (galleryExpected) {
         if (galleryItems !== null) {
-            return galleryItems.length > 0
-                ? cachedImageUrls.length >= galleryItems.length
-                : cachedImageUrls.length > 0;
+            return galleryItems.length > 0 ? cachedImageUrls.length >= galleryItems.length : cachedImageUrls.length > 0;
         }
         return cachedImageCount > 0 && cachedImageUrls.length >= cachedImageCount;
     }
@@ -215,8 +237,10 @@ function cachedMediaSatisfiesExpectedType(submission, cachedSubmission) {
         return cachedImageUrls.length > 0;
     }
     if (submission.is_video === true || ['hosted:video', 'rich:video'].includes(submission.post_hint)) {
-        return (typeof cachedSubmission.mediaVideo === 'string' && cachedSubmission.mediaVideo.length > 0)
-            || (typeof cachedSubmission.mediaHtml === 'string' && cachedSubmission.mediaHtml.length > 0);
+        return (
+            (typeof cachedSubmission.mediaVideo === 'string' && cachedSubmission.mediaVideo.length > 0) ||
+            (typeof cachedSubmission.mediaHtml === 'string' && cachedSubmission.mediaHtml.length > 0)
+        );
     }
     return true;
 }

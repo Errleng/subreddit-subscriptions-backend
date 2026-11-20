@@ -7,7 +7,9 @@ const { Collection, MongoClient } = require('mongodb');
 const modulePath = require.resolve('../mongo');
 const fixtureUri = 'mongodb://127.0.0.1:27017';
 // The driver also exposes callback overloads. These tests use the promise overloads.
-const clientPrototype = /** @type {{ connect: () => Promise<import('mongodb').MongoClient> }} */ (MongoClient.prototype);
+const clientPrototype = /** @type {{ connect: () => Promise<import('mongodb').MongoClient> }} */ (
+    MongoClient.prototype
+);
 const collectionPrototype = /** @type {{
     createIndex: (keys: import('mongodb').IndexSpecification, options: import('mongodb').CreateIndexesOptions) => Promise<string>
 }} */ (Collection.prototype);
@@ -50,7 +52,8 @@ test('initializes the database and TTL index once for concurrent callers', async
 
 test('retries initialization when TTL index creation fails', async () => {
     const connect = mockConnect();
-    const createIndex = vi.spyOn(collectionPrototype, 'createIndex')
+    const createIndex = vi
+        .spyOn(collectionPrototype, 'createIndex')
         .mockRejectedValueOnce(new Error('Index creation failed'))
         .mockResolvedValueOnce('lastUpdateTime_1');
     const database = loadDatabase();

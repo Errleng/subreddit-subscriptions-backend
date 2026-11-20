@@ -7,12 +7,7 @@ const require = createRequire(import.meta.url);
 /** @type {typeof import('../redditRequestScheduler.js')} */
 const scheduler = require('../redditRequestScheduler.js');
 
-const {
-    RedditRequestScheduler,
-    RedditRateLimitError,
-    RedditQueueOverloadError,
-    RedditRequestAbortedError,
-} = scheduler;
+const { RedditRequestScheduler, RedditRateLimitError, RedditQueueOverloadError, RedditRequestAbortedError } = scheduler;
 
 /** @param {(options: { timeout?: number }) => Promise<unknown>} [rawRequest] */
 function createRequester(rawRequest = async () => ({})) {
@@ -31,10 +26,14 @@ test('runs queued operations FIFO and spaces outbound requests', async () => {
     const scheduler = new RedditRequestScheduler(requester, { minRequestIntervalMs: 20 });
     const order = [];
 
-    await Promise.all(['first', 'second', 'third'].map((name) => scheduler.execute(async () => {
-        order.push(name);
-        await requester.rawRequest({});
-    })));
+    await Promise.all(
+        ['first', 'second', 'third'].map((name) =>
+            scheduler.execute(async () => {
+                order.push(name);
+                await requester.rawRequest({});
+            }),
+        ),
+    );
 
     assert.deepEqual(order, ['first', 'second', 'third']);
     assert.equal(starts.length, 3);
@@ -49,11 +48,15 @@ test('a local Snoowrap rate-limit error pauses and rejects queued work', async (
     const first = scheduler.execute(() => Promise.reject(new snoowrap.errors.RateLimitError()));
     const second = scheduler.execute(() => Promise.resolve('should not run'));
 
-    await assert.rejects(first, (error) => error instanceof RedditRateLimitError
-        && error.statusCode === 429
-        && error.retryAfterSeconds >= 1);
+    await assert.rejects(
+        first,
+        (error) => error instanceof RedditRateLimitError && error.statusCode === 429 && error.retryAfterSeconds >= 1,
+    );
     await assert.rejects(second, (error) => error instanceof RedditRateLimitError && error.statusCode === 429);
-    await assert.rejects(scheduler.execute(() => Promise.resolve('blocked')), (error) => error instanceof RedditRateLimitError && error.statusCode === 429);
+    await assert.rejects(
+        scheduler.execute(() => Promise.resolve('blocked')),
+        (error) => error instanceof RedditRateLimitError && error.statusCode === 429,
+    );
 });
 
 test('Snoowrap preserves its local RateLimitError when automatic retries are disabled', async () => {
@@ -70,10 +73,13 @@ test('Snoowrap preserves its local RateLimitError when automatic retries are dis
     requester.ratelimitRemaining = 0;
     requester.ratelimitExpiration = Date.now() + 10000;
 
-    await assert.rejects(Promise.resolve(/** @type {PromiseLike<unknown>} */ (requester.getSubreddit('example').fetch())), (error) => {
-        assert.ok(error instanceof snoowrap.errors.RateLimitError);
-        return true;
-    });
+    await assert.rejects(
+        Promise.resolve(/** @type {PromiseLike<unknown>} */ (requester.getSubreddit('example').fetch())),
+        (error) => {
+            assert.ok(error instanceof snoowrap.errors.RateLimitError);
+            return true;
+        },
+    );
 });
 
 test('translates Snoowrap local quota exhaustion into a server cooldown error', async () => {
@@ -91,12 +97,15 @@ test('translates Snoowrap local quota exhaustion into a server cooldown error', 
     requester.ratelimitExpiration = Date.now() + 10000;
     const scheduler = new RedditRequestScheduler(requester);
 
-    await assert.rejects(scheduler.execute(() => requester.getSubreddit('example').fetch()), (error) => {
-        assert.ok(error instanceof RedditRateLimitError);
-        assert.equal(error.statusCode, 429);
-        assert.ok(error.retryAfterSeconds >= 1);
-        return true;
-    });
+    await assert.rejects(
+        scheduler.execute(() => requester.getSubreddit('example').fetch()),
+        (error) => {
+            assert.ok(error instanceof RedditRateLimitError);
+            assert.equal(error.statusCode, 429);
+            assert.ok(error.retryAfterSeconds >= 1);
+            return true;
+        },
+    );
 });
 
 test('uses an upstream Retry-After header for cooldown duration', async () => {
@@ -106,11 +115,14 @@ test('uses an upstream Retry-After header for cooldown duration', async () => {
         response: { headers: { 'retry-after': '7' } },
     });
 
-    await assert.rejects(scheduler.execute(() => Promise.reject(upstreamError)), (error) => {
-        assert.ok(error instanceof RedditRateLimitError);
-        assert.equal(error.retryAfterSeconds, 7);
-        return true;
-    });
+    await assert.rejects(
+        scheduler.execute(() => Promise.reject(upstreamError)),
+        (error) => {
+            assert.ok(error instanceof RedditRateLimitError);
+            assert.equal(error.retryAfterSeconds, 7);
+            return true;
+        },
+    );
 });
 
 test('rejects new work when the pending queue is full', async () => {
@@ -119,11 +131,14 @@ test('rejects new work when the pending queue is full', async () => {
     const active = scheduler.execute(() => inFlight.promise);
     const pending = scheduler.execute(() => Promise.resolve('second'));
 
-    await assert.rejects(scheduler.execute(() => Promise.resolve('overflow')), (error) => {
-        assert.ok(error instanceof RedditQueueOverloadError);
-        assert.equal(error.statusCode, 503);
-        return true;
-    });
+    await assert.rejects(
+        scheduler.execute(() => Promise.resolve('overflow')),
+        (error) => {
+            assert.ok(error instanceof RedditQueueOverloadError);
+            assert.equal(error.statusCode, 503);
+            return true;
+        },
+    );
 
     inFlight.resolve('done');
     assert.equal(await active, 'done');

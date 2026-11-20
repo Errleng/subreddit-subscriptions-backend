@@ -100,9 +100,12 @@ function sendRouteError(res, error) {
         console.error('Reddit route failed:', error.message);
     }
 
-    const message = error instanceof SubmissionMediaError
-        ? error.message
-        : (status === 404 ? 'Subreddit not found' : 'Reddit request failed');
+    const message =
+        error instanceof SubmissionMediaError
+            ? error.message
+            : status === 404
+              ? 'Subreddit not found'
+              : 'Reddit request failed';
     res.status(status).send({ error: message });
 }
 
@@ -116,32 +119,37 @@ router.get('/', (_req, res) => {
     res.send('Subreddit Subscriptions API');
 });
 
-router.get('/valid/subreddit/:subredditName', handleAsync(async (req, res) => {
-    const request = createRequestAbortController(req, res);
-    try {
-        await redditRequestScheduler.execute(
-            () => reddit.getSubreddit(req.params.subredditName).fetch(),
-            { signal: request.signal },
-        );
-        if (!request.signal.aborted) {
-            res.status(200).send({});
+router.get(
+    '/valid/subreddit/:subredditName',
+    handleAsync(async (req, res) => {
+        const request = createRequestAbortController(req, res);
+        try {
+            await redditRequestScheduler.execute(() => reddit.getSubreddit(req.params.subredditName).fetch(), {
+                signal: request.signal,
+            });
+            if (!request.signal.aborted) {
+                res.status(200).send({});
+            }
+        } catch (error) {
+            if (!request.signal.aborted) {
+                sendRouteError(res, error);
+            }
+        } finally {
+            request.cleanup();
         }
-    } catch (error) {
-        if (!request.signal.aborted) {
-            sendRouteError(res, error);
-        }
-    } finally {
-        request.cleanup();
-    }
-}));
+    }),
+);
 
 /**
  * @param {{ num_images?: number } | null} cachedSubmission
  */
 async function updateSubmissionMedia(submission, cachedSubmission = null, signal) {
     const startTime = performance.now();
-    const galleryExpected = isGallerySubmission(submission)
-        || (cachedSubmission !== null && Number.isInteger(cachedSubmission.num_images) && (cachedSubmission.num_images ?? 0) > 0);
+    const galleryExpected =
+        isGallerySubmission(submission) ||
+        (cachedSubmission !== null &&
+            Number.isInteger(cachedSubmission.num_images) &&
+            (cachedSubmission.num_images ?? 0) > 0);
     let sourceSubmission = submission;
     let mediaData;
     let extractionError = null;
@@ -153,35 +161,41 @@ async function updateSubmissionMedia(submission, cachedSubmission = null, signal
         mediaData = { imageUrls: [], mediaVideo: null, mediaHtml: null, num_images: 0 };
     }
 
-    let expectedMediaError = extractionError || getExpectedMediaError(submission, sourceSubmission, mediaData, galleryExpected);
+    let expectedMediaError =
+        extractionError || getExpectedMediaError(submission, sourceSubmission, mediaData, galleryExpected);
     if (expectedMediaError && !cachedMediaSatisfiesExpectedType(submission, cachedSubmission)) {
         try {
-            sourceSubmission = await redditRequestScheduler.execute(
-                () => submission.fetch(),
-                { signal },
-            );
+            sourceSubmission = await redditRequestScheduler.execute(() => submission.fetch(), { signal });
         } catch (error) {
-            if (error instanceof redditRequestScheduler.RedditRateLimitError
-                || error instanceof redditRequestScheduler.RedditQueueOverloadError
-                || error.code === 'ETIMEDOUT'
-                || error.code === 'ESOCKETTIMEDOUT'
-                || (error.cause && ['ETIMEDOUT', 'ESOCKETTIMEDOUT'].includes(error.cause.code))
-                || error.name === 'TimeoutError'
-                || (signal && signal.aborted)) {
+            if (
+                error instanceof redditRequestScheduler.RedditRateLimitError ||
+                error instanceof redditRequestScheduler.RedditQueueOverloadError ||
+                error.code === 'ETIMEDOUT' ||
+                error.code === 'ESOCKETTIMEDOUT' ||
+                (error.cause && ['ETIMEDOUT', 'ESOCKETTIMEDOUT'].includes(error.cause.code)) ||
+                error.name === 'TimeoutError' ||
+                (signal && signal.aborted)
+            ) {
                 throw error;
             }
-            throw new SubmissionMediaError(`Could not fetch expected media for submission ${submission.id} (${submission.url})`);
+            throw new SubmissionMediaError(
+                `Could not fetch expected media for submission ${submission.id} (${submission.url})`,
+            );
         }
 
         try {
             mediaData = extractSubmissionMedia(sourceSubmission, galleryExpected);
         } catch (error) {
-            throw new SubmissionMediaError(`Could not extract expected media for submission ${submission.id} (${submission.url}): ${error.message}`);
+            throw new SubmissionMediaError(
+                `Could not extract expected media for submission ${submission.id} (${submission.url}): ${error.message}`,
+            );
         }
 
         expectedMediaError = getExpectedMediaError(submission, sourceSubmission, mediaData, galleryExpected);
         if (expectedMediaError) {
-            throw new SubmissionMediaError(`Could not extract expected media for submission ${submission.id} (${submission.url}): ${expectedMediaError.message}`);
+            throw new SubmissionMediaError(
+                `Could not extract expected media for submission ${submission.id} (${submission.url}): ${expectedMediaError.message}`,
+            );
         }
         console.log(`Fetched missing media for submission ${submission.id} - ${submission.title}`);
     }
@@ -197,7 +211,9 @@ async function updateSubmissionMedia(submission, cachedSubmission = null, signal
     };
 
     const result = mergeMediaWithCache(modifiedSubmission, cachedSubmission);
-    console.log(`Extracting media for submission ${submission.id} - ${submission.title} took: ${performance.now() - startTime}ms`);
+    console.log(
+        `Extracting media for submission ${submission.id} - ${submission.title} took: ${performance.now() - startTime}ms`,
+    );
     return result;
 }
 
@@ -262,10 +278,12 @@ async function updateOldSubmissionInDb(snoowrapSubmission, dbSubmission, signal)
         removed_by_category: snoowrapSubmission.removed_by_category,
         created_utc: snoowrapSubmission.created_utc,
     };
-    if (isGallerySubmission(snoowrapSubmission)
-        && hasProp(snoowrapSubmission, 'gallery_data')
-        && Array.isArray(snoowrapSubmission.gallery_data.items)
-        && snoowrapSubmission.gallery_data.items.length > 0) {
+    if (
+        isGallerySubmission(snoowrapSubmission) &&
+        hasProp(snoowrapSubmission, 'gallery_data') &&
+        Array.isArray(snoowrapSubmission.gallery_data.items) &&
+        snoowrapSubmission.gallery_data.items.length > 0
+    ) {
         const cachedImageCount = Number.isInteger(dbSubmission.num_images) ? dbSubmission.num_images : 0;
         updatedSubmission.num_images = Math.max(cachedImageCount, snoowrapSubmission.gallery_data.items.length);
     }
@@ -275,114 +293,124 @@ async function updateOldSubmissionInDb(snoowrapSubmission, dbSubmission, signal)
     return updatedSubmission;
 }
 
-router.get('/subreddit/:subredditName/:sortType/:sortTime/:numSubmissions', handleAsync(async (req, res) => {
-    const request = createRequestAbortController(req, res);
-    const operationController = new AbortController();
-    const abortOperations = () => operationController.abort();
-    request.signal.addEventListener('abort', abortOperations, { once: true });
+router.get(
+    '/subreddit/:subredditName/:sortType/:sortTime/:numSubmissions',
+    handleAsync(async (req, res) => {
+        const request = createRequestAbortController(req, res);
+        const operationController = new AbortController();
+        const abortOperations = () => operationController.abort();
+        request.signal.addEventListener('abort', abortOperations, { once: true });
 
-    try {
-        const { sortType } = req.params;
-        const sortTime = SORT_TIMES.find((time) => time === req.params.sortTime);
-        const numSubmissions = parseInt(req.params.numSubmissions, 10);
-        const subredditName = req.params.subredditName;
-        const subreddit = reddit.getSubreddit(subredditName);
+        try {
+            const { sortType } = req.params;
+            const sortTime = SORT_TIMES.find((time) => time === req.params.sortTime);
+            const numSubmissions = parseInt(req.params.numSubmissions, 10);
+            const subredditName = req.params.subredditName;
+            const subreddit = reddit.getSubreddit(subredditName);
 
-        let sortFunction = null;
-        switch (sortType) {
-            case 'hot':
-                sortFunction = subreddit.getHot.bind(subreddit);
-                break;
-            case 'new':
-                sortFunction = subreddit.getNew.bind(subreddit);
-                break;
-            case 'top':
-                sortFunction = subreddit.getTop.bind(subreddit);
-                break;
-            case 'rising':
-                sortFunction = subreddit.getRising.bind(subreddit);
-                break;
-            case 'controversial':
-                sortFunction = subreddit.getControversial.bind(subreddit);
-                break;
-            default: {
-                throw Object.assign(new Error(`Invalid sort type: ${sortType}`), { statusCode: 400 });
-            }
-        }
-
-        if (sortTime === undefined) {
-            throw Object.assign(new Error(`Invalid sort time: ${req.params.sortTime}`), { statusCode: 400 });
-        }
-        const listingOptions = { time: sortTime, limit: numSubmissions };
-
-        const dbConnect = await db.getDb();
-        const submissionsCollection = dbConnect.collection(config.submissionsCollection);
-        let numAttempts = 0;
-        let longestData = [];
-
-        while (true) {
-            numAttempts++;
-            const data = await redditRequestScheduler.execute(
-                () => sortFunction({ ...listingOptions }),
-                { signal: operationController.signal },
-            );
-            if (data.length > longestData.length) {
-                longestData = data;
-            }
-            if (data.length < numSubmissions) {
-                console.warn(`Retrieved only ${data.length} out of ${numSubmissions} submissions for ${subredditName}`);
-                if (numAttempts <= MAX_ATTEMPTS) {
-                    continue;
+            let sortFunction = null;
+            switch (sortType) {
+                case 'hot':
+                    sortFunction = subreddit.getHot.bind(subreddit);
+                    break;
+                case 'new':
+                    sortFunction = subreddit.getNew.bind(subreddit);
+                    break;
+                case 'top':
+                    sortFunction = subreddit.getTop.bind(subreddit);
+                    break;
+                case 'rising':
+                    sortFunction = subreddit.getRising.bind(subreddit);
+                    break;
+                case 'controversial':
+                    sortFunction = subreddit.getControversial.bind(subreddit);
+                    break;
+                default: {
+                    throw Object.assign(new Error(`Invalid sort type: ${sortType}`), { statusCode: 400 });
                 }
-                console.error(`Max attempts ${MAX_ATTEMPTS} reached for retrying fetching submissions from ${subredditName}. Will return longest API response.`);
             }
 
-            const modifiedData = await Promise.all(
-                longestData.map(async (submission) => {
-                    if (operationController.signal.aborted) {
-                        throw new redditRequestScheduler.RedditRequestAbortedError();
-                    }
-                    if (submission.is_self) {
-                        return submission;
-                    }
-                    const query = { id: submission.id };
-                    const cursor = submissionsCollection.find(query);
-                    const count = await submissionsCollection.countDocuments(query);
-                    if (operationController.signal.aborted) {
-                        throw new redditRequestScheduler.RedditRequestAbortedError();
-                    }
-                    if (count === 0) {
-                        const mediaSubmission = await updateSubmissionMedia(submission, null, operationController.signal);
-                        throwIfRequestAborted(operationController.signal);
-                        mediaSubmission.lastUpdateTime = new Date();
-                        await updateSubmissionInDb(mediaSubmission);
-                        return mediaSubmission;
-                    }
-                    if (count === 1) {
-                        const dbSubmission = await cursor.next();
-                        throwIfRequestAborted(operationController.signal);
-                        return updateOldSubmissionInDb(submission, dbSubmission, operationController.signal);
-                    }
-                    const duplicates = await cursor.toArray();
-                    console.log('Duplicate submissions:', duplicates);
-                    throw new Error(`Found ${count} submissions with same id ${submission.id}`);
-                }),
-            );
+            if (sortTime === undefined) {
+                throw Object.assign(new Error(`Invalid sort time: ${req.params.sortTime}`), { statusCode: 400 });
+            }
+            const listingOptions = { time: sortTime, limit: numSubmissions };
 
+            const dbConnect = await db.getDb();
+            const submissionsCollection = dbConnect.collection(config.submissionsCollection);
+            let numAttempts = 0;
+            let longestData = [];
+
+            while (true) {
+                numAttempts++;
+                const data = await redditRequestScheduler.execute(() => sortFunction({ ...listingOptions }), {
+                    signal: operationController.signal,
+                });
+                if (data.length > longestData.length) {
+                    longestData = data;
+                }
+                if (data.length < numSubmissions) {
+                    console.warn(
+                        `Retrieved only ${data.length} out of ${numSubmissions} submissions for ${subredditName}`,
+                    );
+                    if (numAttempts <= MAX_ATTEMPTS) {
+                        continue;
+                    }
+                    console.error(
+                        `Max attempts ${MAX_ATTEMPTS} reached for retrying fetching submissions from ${subredditName}. Will return longest API response.`,
+                    );
+                }
+
+                const modifiedData = await Promise.all(
+                    longestData.map(async (submission) => {
+                        if (operationController.signal.aborted) {
+                            throw new redditRequestScheduler.RedditRequestAbortedError();
+                        }
+                        if (submission.is_self) {
+                            return submission;
+                        }
+                        const query = { id: submission.id };
+                        const cursor = submissionsCollection.find(query);
+                        const count = await submissionsCollection.countDocuments(query);
+                        if (operationController.signal.aborted) {
+                            throw new redditRequestScheduler.RedditRequestAbortedError();
+                        }
+                        if (count === 0) {
+                            const mediaSubmission = await updateSubmissionMedia(
+                                submission,
+                                null,
+                                operationController.signal,
+                            );
+                            throwIfRequestAborted(operationController.signal);
+                            mediaSubmission.lastUpdateTime = new Date();
+                            await updateSubmissionInDb(mediaSubmission);
+                            return mediaSubmission;
+                        }
+                        if (count === 1) {
+                            const dbSubmission = await cursor.next();
+                            throwIfRequestAborted(operationController.signal);
+                            return updateOldSubmissionInDb(submission, dbSubmission, operationController.signal);
+                        }
+                        const duplicates = await cursor.toArray();
+                        console.log('Duplicate submissions:', duplicates);
+                        throw new Error(`Found ${count} submissions with same id ${submission.id}`);
+                    }),
+                );
+
+                if (!request.signal.aborted) {
+                    res.send(modifiedData);
+                }
+                return;
+            }
+        } catch (error) {
+            operationController.abort();
             if (!request.signal.aborted) {
-                res.send(modifiedData);
+                sendRouteError(res, error);
             }
-            return;
+        } finally {
+            request.signal.removeEventListener('abort', abortOperations);
+            request.cleanup();
         }
-    } catch (error) {
-        operationController.abort();
-        if (!request.signal.aborted) {
-            sendRouteError(res, error);
-        }
-    } finally {
-        request.signal.removeEventListener('abort', abortOperations);
-        request.cleanup();
-    }
-}));
+    }),
+);
 
 module.exports = router;
