@@ -10,6 +10,12 @@ export default defineConfig({
             provider: 'v8',
             include: ['api/**/*.js', 'config.js', 'index.js', 'mongo.js', 'reddit*.js'],
             reporter: ['text', 'html', 'json-summary'],
+            thresholds: {
+                statements: 83,
+                branches: 65,
+                functions: 93,
+                lines: 83,
+            },
         },
     },
 });
