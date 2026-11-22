@@ -56,6 +56,7 @@ test('runs queued operations FIFO and spaces outbound requests', async () => {
 });
 
 test('a local Snoowrap rate-limit error pauses and rejects queued work', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
     const requester = createRequester();
     requester.ratelimitExpiration = Date.now() + 10000;
     const scheduler = new RedditRequestScheduler(requester);
@@ -64,7 +65,7 @@ test('a local Snoowrap rate-limit error pauses and rejects queued work', async (
 
     await assert.rejects(
         first,
-        (error) => error instanceof RedditRateLimitError && error.statusCode === 429 && error.retryAfterSeconds >= 1,
+        (error) => error instanceof RedditRateLimitError && error.statusCode === 429 && error.retryAfterSeconds === 10,
     );
     await assert.rejects(second, (error) => error instanceof RedditRateLimitError && error.statusCode === 429);
     await assert.rejects(
@@ -97,6 +98,7 @@ test('Snoowrap preserves its local RateLimitError when automatic retries are dis
 });
 
 test('translates Snoowrap local quota exhaustion into a server cooldown error', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
     const requester = new snoowrap({
         userAgent: 'scheduler test',
         clientId: 'placeholder',
@@ -116,41 +118,42 @@ test('translates Snoowrap local quota exhaustion into a server cooldown error', 
         (error) => {
             assert.ok(error instanceof RedditRateLimitError);
             assert.equal(error.statusCode, 429);
-            assert.ok(error.retryAfterSeconds >= 1);
-            return true;
-        },
-    );
-});
-
-test('uses an upstream Retry-After header for cooldown duration', async () => {
-    const scheduler = new RedditRequestScheduler(createRequester());
-    const upstreamError = Object.assign(new Error('Too many requests'), {
-        statusCode: 429,
-        response: { headers: { 'retry-after': '7' } },
-    });
-
-    await assert.rejects(
-        scheduler.execute(() => Promise.reject(upstreamError)),
-        (error) => {
-            assert.ok(error instanceof RedditRateLimitError);
-            assert.equal(error.retryAfterSeconds, 7);
+            assert.equal(error.retryAfterSeconds, 10);
             return true;
         },
     );
 });
 
 test.each([
-    { headers: { 'Retry-After': 'Wed, 01 Jan 2025 00:00:07 GMT' }, seconds: 7 },
-    { headers: { 'Retry-After': '1.25' }, seconds: 2 },
-    { headers: { 'Retry-After': 'Tue, 31 Dec 2024 23:59:59 GMT' }, seconds: 60 },
-    { headers: { 'Retry-After': 'invalid' }, seconds: 60 },
-    { headers: { 'Content-Type': 'application/json' }, seconds: 60 },
-])('applies a $seconds-second cooldown for upstream headers $headers', async ({ headers, seconds }) => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2025-01-01T00:00:00.000Z'));
+    {
+        name: 'a numeric header takes precedence over the quota reset',
+        headers: { 'retry-after': '7' },
+        statusCode: 429,
+        resetInSeconds: 10,
+        seconds: 7,
+    },
+    { name: 'future HTTP date', headers: { 'Retry-After': 'Wed, 01 Jan 2025 00:00:07 GMT' }, seconds: 7 },
+    { name: 'fractional seconds rounded up', headers: { 'Retry-After': '1.25' }, seconds: 2 },
+    { name: 'past HTTP date', headers: { 'Retry-After': 'Tue, 31 Dec 2024 23:59:59 GMT' }, seconds: 60 },
+    { name: 'invalid header', headers: { 'Retry-After': 'invalid' }, seconds: 60 },
+    {
+        name: 'missing header with a quota reset',
+        headers: { 'Content-Type': 'application/json' },
+        resetInSeconds: 10,
+        seconds: 10,
+    },
+    { name: 'missing header without a quota reset', headers: { 'Content-Type': 'application/json' }, seconds: 60 },
+])('applies a $seconds-second cooldown for $name', async ({ headers, statusCode, resetInSeconds, seconds }) => {
+    vi.useFakeTimers({ now: new Date('2025-01-01T00:00:00.000Z') });
     const requester = createRequester();
+    if (resetInSeconds !== undefined) {
+        requester.ratelimitExpiration = Date.now() + resetInSeconds * 1000;
+    }
     const scheduler = new RedditRequestScheduler(requester);
-    const upstreamError = Object.assign(new Error('Too many requests'), { response: { statusCode: 429, headers } });
+    const upstreamError = Object.assign(new Error('Too many requests'), {
+        statusCode,
+        response: { statusCode: statusCode === undefined ? 429 : undefined, headers },
+    });
 
     await assert.rejects(
         scheduler.execute(() => Promise.reject(upstreamError)),
@@ -160,7 +163,7 @@ test.each([
     await vi.advanceTimersByTimeAsync(seconds * 1000 - 1);
     await assert.rejects(requester.rawRequest({}), (error) => error instanceof RedditRateLimitError);
     await vi.advanceTimersByTimeAsync(1);
-    assert.equal(await scheduler.execute(() => 'resumed'), 'resumed');
+    assert.deepEqual(await scheduler.execute(() => requester.rawRequest({})), {});
 });
 
 test('rejects new work when the pending queue is full', async () => {
