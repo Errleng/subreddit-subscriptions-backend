@@ -33,6 +33,8 @@ Vitest requires 90% coverage for statements, branches, and lines, and 93% for fu
 
 TypeScript checks JavaScript through `checkJs` with strict mode, checked indexed access, exact optional properties, and control-flow checks. The test project extends the service rules. Both projects emit no files and skip third-party declaration checking. This service runs JavaScript directly, so the build is a syntax check.
 
+Type-aware linting checks promise handling, unsafe uses of `any`, and exhaustive switches in source and test files.
+
 ### Pre-commit and CI
 
 Run `git rev-parse --git-path hooks` to check for existing hooks. In a clone with only Git's samples, activate the tracked pre-commit hook once.
