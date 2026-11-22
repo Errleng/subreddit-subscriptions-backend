@@ -11,10 +11,10 @@ export default defineConfig({
             include: ['api/**/*.js', 'config.js', 'index.js', 'mongo.js', 'reddit*.js'],
             reporter: ['text', 'html', 'json-summary'],
             thresholds: {
-                statements: 83,
-                branches: 65,
+                statements: 90,
+                branches: 90,
                 functions: 93,
-                lines: 83,
+                lines: 90,
             },
         },
     },
