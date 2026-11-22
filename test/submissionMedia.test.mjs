@@ -3,8 +3,7 @@ import { createRequire } from 'node:module';
 import { test } from 'vitest';
 
 const require = createRequire(import.meta.url);
-/** @type {typeof import('../api/submissionMedia.js')} */
-const media = require('../api/submissionMedia.js');
+const media = /** @type {typeof import('../api/submissionMedia.js')} */ (require('../api/submissionMedia.js'));
 
 const { extractSubmissionMedia, getExpectedMediaError, cachedMediaSatisfiesExpectedType, mergeMediaWithCache } = media;
 const imageUrl = 'https://images.example/fixture.jpg';

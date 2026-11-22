@@ -2,8 +2,7 @@ import { createRequire } from 'node:module';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
 const require = createRequire(import.meta.url);
-/** @type {typeof import('mongodb')} */
-const { Collection, MongoClient } = require('mongodb');
+const { Collection, MongoClient } = /** @type {typeof import('mongodb')} */ (require('mongodb'));
 const modulePath = require.resolve('../mongo');
 const fixtureUri = 'mongodb://127.0.0.1:27017';
 // The driver also exposes callback overloads. These tests use the promise overloads.
@@ -34,9 +33,7 @@ function mockConnect() {
 }
 
 function loadDatabase() {
-    /** @type {typeof import('../mongo.js')} */
-    const database = require('../mongo');
-    return database;
+    return /** @type {typeof import('../mongo.js')} */ (require('../mongo'));
 }
 
 test('initializes the database and TTL index once for concurrent callers', async () => {

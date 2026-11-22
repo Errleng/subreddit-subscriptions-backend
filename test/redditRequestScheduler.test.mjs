@@ -4,8 +4,9 @@ import { afterEach, test, vi } from 'vitest';
 import snoowrap from 'snoowrap';
 
 const require = createRequire(import.meta.url);
-/** @type {typeof import('../redditRequestScheduler.js')} */
-const scheduler = require('../redditRequestScheduler.js');
+const scheduler = /** @type {typeof import('../redditRequestScheduler.js')} */ (
+    require('../redditRequestScheduler.js')
+);
 
 const { RedditRequestScheduler, RedditRateLimitError, RedditQueueOverloadError, RedditRequestAbortedError } = scheduler;
 

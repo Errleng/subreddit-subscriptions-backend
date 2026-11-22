@@ -30,5 +30,7 @@ test.each([
         file === configFile ? contents : readFileSync(file, options),
     );
 
-    expect(() => require('../config.js')).toThrow(message);
+    expect(() => {
+        require('../config.js');
+    }).toThrow(message);
 });

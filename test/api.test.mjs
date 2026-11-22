@@ -3,6 +3,7 @@ import { createServer, get } from 'node:http';
 import Module, { createRequire } from 'node:module';
 import { text } from 'node:stream/consumers';
 import { setImmediate } from 'node:timers/promises';
+import dotenv from 'dotenv';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
 
 const require = createRequire(import.meta.url);
@@ -25,6 +26,16 @@ const collection = {
     updateOne: vi.fn(),
 };
 
+/**
+ * Vitest accepts these matchers as opaque expected values.
+ * @type {{
+ *     any: (type: Parameters<typeof expect.any>[0]) => unknown,
+ *     objectContaining: (sample: object) => unknown,
+ *     stringContaining: (sample: string) => unknown,
+ * }}
+ */
+const asymmetricMatchers = expect;
+
 const stubs = new Map([
     [require.resolve('../reddit'), { getSubreddit, rawRequest }],
     [require.resolve('../mongo'), { getDb: async () => ({ collection: () => collection }) }],
@@ -32,14 +43,15 @@ const stubs = new Map([
 
 function loadApp() {
     // The app uses CommonJS require(), which Vitest's ESM mocks do not intercept.
+    /** @type {Map<string, NodeJS.Module | undefined>} */
     const originalModules = new Map();
     for (const [path, exports] of stubs) {
         originalModules.set(path, require.cache[path]);
         require.cache[path] = Object.assign(new Module(path), { exports, loaded: true });
     }
-    const loadEnv = vi.spyOn(require('dotenv'), 'config').mockReturnValue({});
+    const loadEnv = vi.spyOn(dotenv, 'config').mockReturnValue({});
     try {
-        return require('../index');
+        return /** @type {typeof import('../index.js')} */ (require('../index'));
     } finally {
         loadEnv.mockRestore();
         for (const [path, original] of originalModules) {
@@ -88,7 +100,10 @@ afterEach(() => {
 
 /** @param {string} path */
 async function request(path) {
-    const [response] = await once(get(`${origin}/api${path}`, { agent: false }), 'response');
+    // The HTTP client's response event always carries one IncomingMessage.
+    const [response] = /** @type {[import('node:http').IncomingMessage]} */ (
+        await once(get(`${origin}/api${path}`, { agent: false }), 'response')
+    );
     return { status: response.statusCode, headers: response.headers, body: await text(response) };
 }
 
@@ -159,7 +174,7 @@ test('retries a short listing and saves extracted media for new posts', async ()
     expect(getTop).toHaveBeenCalledWith({ time: 'day', limit: 2 });
     expect(collection.updateOne).toHaveBeenCalledExactlyOnceWith(
         { id: imagePost.id },
-        { $set: expect.objectContaining({ id: imagePost.id, imageUrls: [imageUrl] }) },
+        { $set: asymmetricMatchers.objectContaining({ id: imagePost.id, imageUrls: [imageUrl] }) },
         { upsert: true },
     );
 });
@@ -183,7 +198,7 @@ test('refreshes listing metrics while preserving fresh cached media and its time
     expect(collection.countDocuments).toHaveBeenCalledExactlyOnceWith(query);
     expect(collection.updateOne).toHaveBeenCalledExactlyOnceWith(
         query,
-        { $set: expect.objectContaining({ score: 7, imageUrls: [imageUrl], lastUpdateTime }) },
+        { $set: asymmetricMatchers.objectContaining({ score: 7, imageUrls: [imageUrl], lastUpdateTime }) },
         { upsert: true },
     );
 });
@@ -205,7 +220,7 @@ test('refreshes stale cached media and writes a new cache timestamp', async () =
     ]);
     expect(collection.updateOne).toHaveBeenCalledExactlyOnceWith(
         { id: cached.id },
-        { $set: expect.objectContaining({ imageUrls: [imageUrl], lastUpdateTime: cacheCheckTime }) },
+        { $set: asymmetricMatchers.objectContaining({ imageUrls: [imageUrl], lastUpdateTime: cacheCheckTime }) },
         { upsert: true },
     );
 });
@@ -224,7 +239,12 @@ test('rebuilds a cache record that disappears between the count and cursor read'
     expect(next).toHaveBeenCalledOnce();
     expect(collection.updateOne).toHaveBeenCalledExactlyOnceWith(
         { id },
-        { $set: expect.objectContaining({ imageUrls: [imageUrl], lastUpdateTime: expect.any(Date) }) },
+        {
+            $set: asymmetricMatchers.objectContaining({
+                imageUrls: [imageUrl],
+                lastUpdateTime: asymmetricMatchers.any(Date),
+            }),
+        },
         { upsert: true },
     );
 });
@@ -246,12 +266,24 @@ test('preserves complete legacy gallery media and fills missing cache metadata',
 
     expect(response.status).toBe(200);
     expect(JSON.parse(response.body)).toMatchObject([
-        { id: cached.id, imageUrls: [imageUrl], num_images: 1, score: 9, lastUpdateTime: expect.any(String) },
+        {
+            id: cached.id,
+            imageUrls: [imageUrl],
+            num_images: 1,
+            score: 9,
+            lastUpdateTime: asymmetricMatchers.any(String),
+        },
     ]);
     expect(post.fetch).not.toHaveBeenCalled();
     expect(collection.updateOne).toHaveBeenCalledExactlyOnceWith(
         { id: cached.id },
-        { $set: expect.objectContaining({ imageUrls: [imageUrl], num_images: 1, lastUpdateTime: expect.any(Date) }) },
+        {
+            $set: asymmetricMatchers.objectContaining({
+                imageUrls: [imageUrl],
+                num_images: 1,
+                lastUpdateTime: asymmetricMatchers.any(Date),
+            }),
+        },
         { upsert: true },
     );
 });
@@ -274,7 +306,7 @@ test('uses the cached gallery count to recover media when the listing lacks the 
     expect(fetch).toHaveBeenCalledOnce();
     expect(collection.updateOne).toHaveBeenCalledExactlyOnceWith(
         { id: cached.id },
-        { $set: expect.objectContaining({ imageUrls: [imageUrl], num_images: 1 }) },
+        { $set: asymmetricMatchers.objectContaining({ imageUrls: [imageUrl], num_images: 1 }) },
         { upsert: true },
     );
 });
@@ -296,7 +328,9 @@ test.each([
 });
 
 test('returns a retry interval when the scheduler rejects an overloaded request', async () => {
-    const { RedditQueueOverloadError } = require('../redditRequestScheduler.js');
+    const { RedditQueueOverloadError } = /** @type {typeof import('../redditRequestScheduler.js')} */ (
+        require('../redditRequestScheduler.js')
+    );
     about.mockRejectedValue(new RedditQueueOverloadError());
 
     const response = await request('/valid/subreddit/example');
@@ -307,7 +341,9 @@ test('returns a retry interval when the scheduler rejects an overloaded request'
 });
 
 test('exposes the upstream cooldown and blocks new Reddit requests', async () => {
-    const scheduler = require('../redditRequestSchedulerInstance');
+    const scheduler = /** @type {typeof import('../redditRequestSchedulerInstance.js')} */ (
+        require('../redditRequestSchedulerInstance')
+    );
     about.mockRejectedValue(
         Object.assign(new Error('Upstream quota exhausted'), {
             statusCode: 429,
@@ -359,7 +395,9 @@ test('reports missing media after a detail fetch also returns an incomplete gall
     const response = await request('/subreddit/example/top/day/1');
 
     expect(response.status).toBe(502);
-    expect(JSON.parse(response.body)).toEqual({ error: expect.stringContaining('Could not extract expected media') });
+    expect(JSON.parse(response.body)).toEqual({
+        error: asymmetricMatchers.stringContaining('Could not extract expected media'),
+    });
     expect(collection.updateOne).not.toHaveBeenCalled();
 });
 
@@ -371,7 +409,9 @@ test('reports missing video when the detail has no usable embed metadata', async
     const response = await request('/subreddit/example/top/day/1');
 
     expect(response.status).toBe(502);
-    expect(JSON.parse(response.body)).toEqual({ error: expect.stringContaining('has no video or embed metadata') });
+    expect(JSON.parse(response.body)).toEqual({
+        error: asymmetricMatchers.stringContaining('has no video or embed metadata'),
+    });
     expect(collection.updateOne).not.toHaveBeenCalled();
 });
 
@@ -389,7 +429,7 @@ test.each([
     const response = await request('/subreddit/example/top/day/1');
 
     expect(response.status).toBe(status);
-    expect(JSON.parse(response.body)).toEqual({ error: expect.stringContaining(message) });
+    expect(JSON.parse(response.body)).toEqual({ error: asymmetricMatchers.stringContaining(message) });
     expect(fetch).toHaveBeenCalledOnce();
     expect(collection.updateOne).not.toHaveBeenCalled();
 });
