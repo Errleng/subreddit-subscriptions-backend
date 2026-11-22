@@ -1,4 +1,5 @@
 const snoowrap = require('snoowrap');
+const { getErrorProperty } = require('./errorDetails');
 
 const MIN_REQUEST_INTERVAL_MS = 1001;
 const MAX_PENDING_REQUESTS = 50;
@@ -6,7 +7,23 @@ const MAX_QUEUE_WAIT_MS = 20000;
 const OVERLOAD_RETRY_AFTER_SECONDS = 5;
 const DEFAULT_RATE_LIMIT_RETRY_AFTER_SECONDS = 60;
 
+/**
+ * @typedef {object} Job
+ * @property {() => unknown} operation
+ * @property {AbortSignal | undefined} signal
+ * @property {(result: unknown) => void} resolve
+ * @property {(reason: unknown) => void} reject
+ * @property {boolean} started
+ * @property {boolean} settled
+ * @property {NodeJS.Timeout | undefined} expirationTimer
+ * @property {(() => void) | null} abortHandler
+ */
+
 class RedditRateLimitError extends Error {
+    /**
+     * @param {number} retryAfterSeconds
+     * @param {unknown} [cause]
+     */
     constructor(retryAfterSeconds, cause) {
         super('Reddit rate limit reached');
         this.name = 'RedditRateLimitError';
@@ -33,16 +50,18 @@ class RedditRequestAbortedError extends Error {
     }
 }
 
+/** @param {unknown} error */
 function getRetryAfterHeader(error) {
-    const headers = error && error.response && error.response.headers;
+    const headers = getErrorProperty(getErrorProperty(error, 'response'), 'headers');
     if (!headers || typeof headers !== 'object') {
         return null;
     }
 
     const headerName = Object.keys(headers).find((name) => name.toLowerCase() === 'retry-after');
-    return headerName ? headers[headerName] : null;
+    return headerName ? getErrorProperty(headers, headerName) : null;
 }
 
+/** @param {unknown} value */
 function parseRetryAfter(value, now = Date.now()) {
     if (typeof value !== 'string' && typeof value !== 'number') {
         return null;
@@ -61,11 +80,13 @@ function parseRetryAfter(value, now = Date.now()) {
     return null;
 }
 
+/** @param {unknown} error */
 function isRateLimitError(error) {
     return (
         error instanceof RedditRateLimitError ||
         error instanceof snoowrap.errors.RateLimitError ||
-        (error && (error.statusCode === 429 || (error.response && error.response.statusCode === 429)))
+        getErrorProperty(error, 'statusCode') === 429 ||
+        getErrorProperty(getErrorProperty(error, 'response'), 'statusCode') === 429
     );
 }
 
@@ -111,14 +132,19 @@ function delay(milliseconds, signal) {
     });
 }
 
+/** @template {{ timeout?: number }} RequestOptions */
 class RedditRequestScheduler {
+    /**
+     * @param {{ rawRequest: (options: RequestOptions) => Promise<unknown>, ratelimitExpiration: number | null }} redditRequester
+     * @param {{ minRequestIntervalMs?: number, maxPendingRequests?: number, maxQueueWaitMs?: number }} [options]
+     */
     constructor(redditRequester, options = {}) {
         this.reddit = redditRequester;
         this.minRequestIntervalMs = options.minRequestIntervalMs ?? MIN_REQUEST_INTERVAL_MS;
         this.maxPendingRequests = options.maxPendingRequests ?? MAX_PENDING_REQUESTS;
         this.maxQueueWaitMs = options.maxQueueWaitMs ?? MAX_QUEUE_WAIT_MS;
-        this.pending = [];
-        this.activeJob = null;
+        this.pending = /** @type {Job[]} */ ([]);
+        this.activeJob = /** @type {Job | null} */ (null);
         this.nextRequestAt = 0;
         this.pausedUntil = 0;
 
@@ -132,6 +158,12 @@ class RedditRequestScheduler {
             );
     }
 
+    /**
+     * @template Result
+     * @param {() => Result | PromiseLike<Result>} operation
+     * @param {{ signal?: AbortSignal }} [options]
+     * @returns {Promise<Result>}
+     */
     execute(operation, options = {}) {
         const { signal } = options;
         const cooldownError = this.getCooldownError();
@@ -148,15 +180,17 @@ class RedditRequestScheduler {
         }
 
         return new Promise((resolve, reject) => {
+            /** @type {Job} */
             const job = {
                 operation,
                 signal,
-                resolve,
+                // The queue mixes result types, but each resolve receives only its own operation's awaited result.
+                resolve: /** @type {(result: unknown) => void} */ (resolve),
                 reject,
                 started: false,
                 settled: false,
-                expirationTimer: /** @type {NodeJS.Timeout | null} */ (null),
-                abortHandler: /** @type {(() => void) | null} */ (null),
+                expirationTimer: undefined,
+                abortHandler: null,
             };
 
             if (signal) {
@@ -202,8 +236,7 @@ class RedditRequestScheduler {
             return;
         }
 
-        while (this.pending.length > 0) {
-            const nextJob = this.pending.shift();
+        for (let nextJob = this.pending.shift(); nextJob !== undefined; nextJob = this.pending.shift()) {
             if (nextJob.settled) {
                 continue;
             }
@@ -224,6 +257,7 @@ class RedditRequestScheduler {
         }
     }
 
+    /** @param {Job} job */
     startJob(job) {
         this.activeJob = job;
         job.started = true;
@@ -237,7 +271,7 @@ class RedditRequestScheduler {
                 return job.operation();
             })
             .then((result) => this.settle(job, { result }))
-            .catch((error) => {
+            .catch((/** @type {unknown} */ error) => {
                 if (isRateLimitError(error)) {
                     const rateLimitError = this.startCooldown(error);
                     this.rejectPending(rateLimitError);
@@ -253,11 +287,12 @@ class RedditRequestScheduler {
             });
     }
 
+    /** @param {unknown} cause */
     startCooldown(cause) {
         const now = Date.now();
         const headerDelay = parseRetryAfter(getRetryAfterHeader(cause), now);
-        const resetDelay =
-            this.reddit.ratelimitExpiration > now ? Math.ceil((this.reddit.ratelimitExpiration - now) / 1000) : null;
+        const resetAt = this.reddit.ratelimitExpiration;
+        const resetDelay = resetAt !== null && resetAt > now ? Math.ceil((resetAt - now) / 1000) : null;
         const retryAfterSeconds = headerDelay || resetDelay || DEFAULT_RATE_LIMIT_RETRY_AFTER_SECONDS;
 
         this.pausedUntil = Math.max(this.pausedUntil, now + retryAfterSeconds * 1000);
@@ -272,16 +307,22 @@ class RedditRequestScheduler {
         return new RedditRateLimitError(Math.max(1, Math.ceil(remainingMs / 1000)));
     }
 
+    /** @param {unknown} error */
     rejectPending(error) {
         const pendingJobs = this.pending.splice(0);
         pendingJobs.forEach((job) => this.settle(job, { error }));
     }
 
+    /**
+     * @param {AbortSignal | undefined} signal
+     * @param {unknown} error
+     */
     rejectPendingForSignal(signal, error) {
         if (!signal) {
             return;
         }
 
+        /** @type {Job[]} */
         const retainedJobs = [];
         this.pending.forEach((job) => {
             if (job.signal === signal) {
@@ -293,6 +334,7 @@ class RedditRequestScheduler {
         this.pending = retainedJobs;
     }
 
+    /** @param {Job} job */
     expireJob(job) {
         if (job.settled || job.started) {
             return;
@@ -308,6 +350,7 @@ class RedditRequestScheduler {
         this.processNext();
     }
 
+    /** @param {Job} job */
     abortJob(job) {
         if (job.settled) {
             return;
@@ -326,6 +369,10 @@ class RedditRequestScheduler {
         this.processNext();
     }
 
+    /**
+     * @param {Job} job
+     * @param {{ error: unknown } | { result: unknown }} outcome
+     */
     settle(job, outcome) {
         if (job.settled) {
             return;

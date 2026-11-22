@@ -142,9 +142,11 @@ router.get(
     handleAsync(async (req, res) => {
         const request = createRequestAbortController(req, res);
         try {
-            await redditRequestScheduler.execute(() => reddit.getSubreddit(req.params.subredditName).fetch(), {
-                signal: request.signal,
-            });
+            await redditRequestScheduler.execute(
+                // Only the success or failure matters here. Snoowrap's result is also a proxy thenable.
+                () => /** @type {PromiseLike<unknown>} */ (reddit.getSubreddit(req.params.subredditName).fetch()),
+                { signal: request.signal },
+            );
             if (!request.signal.aborted) {
                 res.status(200).send({});
             }

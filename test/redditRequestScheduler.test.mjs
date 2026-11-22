@@ -24,12 +24,14 @@ function createRequester(rawRequest = async () => ({})) {
 test('runs queued operations FIFO and spaces outbound requests', async () => {
     vi.useFakeTimers();
     const startTime = Date.now();
+    /** @type {{ elapsed: number, timeout: number | undefined }[]} */
     const starts = [];
     const requester = createRequester(async ({ timeout }) => {
         starts.push({ elapsed: Date.now() - startTime, timeout });
         return {};
     });
     const scheduler = new RedditRequestScheduler(requester, { minRequestIntervalMs: 20 });
+    /** @type {string[]} */
     const order = [];
     const { signal } = new AbortController();
 
