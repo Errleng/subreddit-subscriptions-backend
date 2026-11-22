@@ -3,10 +3,11 @@ import { createServer, get } from 'node:http';
 import Module, { createRequire } from 'node:module';
 import { text } from 'node:stream/consumers';
 import { setImmediate } from 'node:timers/promises';
-import { afterAll, beforeAll, beforeEach, expect, test, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
 
 const require = createRequire(import.meta.url);
 const imageUrl = 'https://images.example/preview.jpg';
+const cacheCheckTime = new Date('2025-01-01T00:00:00.000Z');
 const getSubreddit = vi.fn();
 const rawRequest = async () => {
     throw new Error('Unexpected network request');
@@ -77,6 +78,10 @@ beforeEach(() => {
     about.mockResolvedValue({});
     collection.countDocuments.mockResolvedValue(0);
     collection.updateOne.mockResolvedValue({});
+});
+
+afterEach(() => {
+    vi.useRealTimers();
 });
 
 async function request(path) {
@@ -156,24 +161,33 @@ test('retries a short listing and saves extracted media for new posts', async ()
     );
 });
 
-test('uses cached media and refreshes metrics from the listing', async () => {
-    const cachedPost = { id: 'image1', imageUrls: [imageUrl], score: 1, lastUpdateTime: new Date() };
+test('refreshes listing metrics while preserving fresh cached media and its timestamp', async () => {
+    vi.useFakeTimers({ now: cacheCheckTime, toFake: ['Date'] });
+    const lastUpdateTime = new Date('2024-12-31T23:00:00.000Z');
+    const cachedPost = { id: 'image1', imageUrls: [imageUrl], score: 1, lastUpdateTime };
     getTop.mockResolvedValue([{ id: cachedPost.id, post_hint: 'image', score: 7 }]);
     collection.countDocuments.mockResolvedValue(1);
     collection.find.mockReturnValue({ next: async () => cachedPost });
 
     const response = await request('/subreddit/example/top/day/1');
+
     expect(response.status).toBe(200);
-    expect(JSON.parse(response.body)).toMatchObject([{ id: cachedPost.id, score: 7, imageUrls: [imageUrl] }]);
+    expect(JSON.parse(response.body)).toMatchObject([
+        { id: cachedPost.id, score: 7, imageUrls: [imageUrl], lastUpdateTime: lastUpdateTime.toISOString() },
+    ]);
+    const query = { id: cachedPost.id };
+    expect(collection.find).toHaveBeenCalledExactlyOnceWith(query);
+    expect(collection.countDocuments).toHaveBeenCalledExactlyOnceWith(query);
     expect(collection.updateOne).toHaveBeenCalledExactlyOnceWith(
-        { id: cachedPost.id },
-        { $set: expect.objectContaining({ score: 7, imageUrls: [imageUrl] }) },
+        query,
+        { $set: expect.objectContaining({ score: 7, imageUrls: [imageUrl], lastUpdateTime }) },
         { upsert: true },
     );
 });
 
 test('refreshes stale cached media and writes a new cache timestamp', async () => {
-    const lastUpdateTime = new Date('2000-01-01T00:00:00.000Z');
+    vi.useFakeTimers({ now: cacheCheckTime, toFake: ['Date'] });
+    const lastUpdateTime = new Date('2024-12-29T00:00:00.000Z');
     const cached = { id: 'image1', imageUrls: ['https://images.example/old.jpg'], lastUpdateTime };
     const post = { id: cached.id, post_hint: 'image', thumbnail: imageUrl, score: 4 };
     getTop.mockResolvedValue([post]);
@@ -183,12 +197,12 @@ test('refreshes stale cached media and writes a new cache timestamp', async () =
     const response = await request('/subreddit/example/top/day/1');
 
     expect(response.status).toBe(200);
-    const [result] = JSON.parse(response.body);
-    expect(result).toMatchObject({ id: cached.id, imageUrls: [imageUrl], score: 4 });
-    expect(Date.parse(result.lastUpdateTime)).toBeGreaterThan(lastUpdateTime.getTime());
+    expect(JSON.parse(response.body)).toMatchObject([
+        { id: cached.id, imageUrls: [imageUrl], score: 4, lastUpdateTime: cacheCheckTime.toISOString() },
+    ]);
     expect(collection.updateOne).toHaveBeenCalledExactlyOnceWith(
         { id: cached.id },
-        { $set: expect.objectContaining({ imageUrls: [imageUrl], lastUpdateTime: new Date(result.lastUpdateTime) }) },
+        { $set: expect.objectContaining({ imageUrls: [imageUrl], lastUpdateTime: cacheCheckTime }) },
         { upsert: true },
     );
 });
