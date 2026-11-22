@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { test } from 'vitest';
+import { afterEach, test, vi } from 'vitest';
 import snoowrap from 'snoowrap';
 
 const require = createRequire(import.meta.url);
@@ -8,6 +8,10 @@ const require = createRequire(import.meta.url);
 const scheduler = require('../redditRequestScheduler.js');
 
 const { RedditRequestScheduler, RedditRateLimitError, RedditQueueOverloadError, RedditRequestAbortedError } = scheduler;
+
+afterEach(() => {
+    vi.useRealTimers();
+});
 
 /** @param {(options: { timeout?: number }) => Promise<unknown>} [rawRequest] */
 function createRequester(rawRequest = async () => ({})) {
@@ -18,27 +22,37 @@ function createRequester(rawRequest = async () => ({})) {
 }
 
 test('runs queued operations FIFO and spaces outbound requests', async () => {
+    vi.useFakeTimers();
+    const startTime = Date.now();
     const starts = [];
-    const requester = createRequester(async () => {
-        starts.push(Date.now());
+    const requester = createRequester(async ({ timeout }) => {
+        starts.push({ elapsed: Date.now() - startTime, timeout });
         return {};
     });
     const scheduler = new RedditRequestScheduler(requester, { minRequestIntervalMs: 20 });
     const order = [];
+    const { signal } = new AbortController();
 
-    await Promise.all(
-        ['first', 'second', 'third'].map((name) =>
-            scheduler.execute(async () => {
-                order.push(name);
-                await requester.rawRequest({});
-            }),
+    const completed = Promise.all(
+        ['first', 'second', 'third'].map((name, index) =>
+            scheduler.execute(
+                async () => {
+                    order.push(name);
+                    await requester.rawRequest(index === 1 ? { timeout: 100 } : {});
+                },
+                { signal },
+            ),
         ),
     );
+    await vi.advanceTimersByTimeAsync(40);
+    await completed;
 
     assert.deepEqual(order, ['first', 'second', 'third']);
-    assert.equal(starts.length, 3);
-    assert.ok(starts[1] - starts[0] >= 15);
-    assert.ok(starts[2] - starts[1] >= 15);
+    assert.deepEqual(starts, [
+        { elapsed: 0, timeout: 30000 },
+        { elapsed: 20, timeout: 100 },
+        { elapsed: 40, timeout: 30000 },
+    ]);
 });
 
 test('a local Snoowrap rate-limit error pauses and rejects queued work', async () => {
@@ -125,6 +139,30 @@ test('uses an upstream Retry-After header for cooldown duration', async () => {
     );
 });
 
+test.each([
+    { headers: { 'Retry-After': 'Wed, 01 Jan 2025 00:00:07 GMT' }, seconds: 7 },
+    { headers: { 'Retry-After': '1.25' }, seconds: 2 },
+    { headers: { 'Retry-After': 'Tue, 31 Dec 2024 23:59:59 GMT' }, seconds: 60 },
+    { headers: { 'Retry-After': 'invalid' }, seconds: 60 },
+    { headers: { 'Content-Type': 'application/json' }, seconds: 60 },
+])('applies a $seconds-second cooldown for upstream headers $headers', async ({ headers, seconds }) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2025-01-01T00:00:00.000Z'));
+    const requester = createRequester();
+    const scheduler = new RedditRequestScheduler(requester);
+    const upstreamError = Object.assign(new Error('Too many requests'), { response: { statusCode: 429, headers } });
+
+    await assert.rejects(
+        scheduler.execute(() => Promise.reject(upstreamError)),
+        (error) => error instanceof RedditRateLimitError && error.retryAfterSeconds === seconds,
+    );
+
+    await vi.advanceTimersByTimeAsync(seconds * 1000 - 1);
+    await assert.rejects(requester.rawRequest({}), (error) => error instanceof RedditRateLimitError);
+    await vi.advanceTimersByTimeAsync(1);
+    assert.equal(await scheduler.execute(() => 'resumed'), 'resumed');
+});
+
 test('rejects new work when the pending queue is full', async () => {
     const inFlight = Promise.withResolvers();
     const scheduler = new RedditRequestScheduler(createRequester(), { maxPendingRequests: 1 });
@@ -146,15 +184,56 @@ test('rejects new work when the pending queue is full', async () => {
 });
 
 test('expires queued work that waits too long and removes it from the queue', async () => {
+    vi.useFakeTimers();
     const inFlight = Promise.withResolvers();
     const scheduler = new RedditRequestScheduler(createRequester(), { maxQueueWaitMs: 20 });
     const active = scheduler.execute(() => inFlight.promise);
     const pending = scheduler.execute(() => Promise.resolve('expired'));
+    const rejected = assert.rejects(pending, (error) => error instanceof RedditQueueOverloadError);
 
-    await assert.rejects(pending, (error) => error instanceof RedditQueueOverloadError);
+    await vi.advanceTimersByTimeAsync(20);
+    await rejected;
     inFlight.resolve('done');
     assert.equal(await active, 'done');
     assert.equal(scheduler.pending.length, 0);
+});
+
+test('drops queued work for the failed request while preserving other requests', async () => {
+    const inFlight = Promise.withResolvers();
+    const scheduler = new RedditRequestScheduler(createRequester());
+    const { signal } = new AbortController();
+    const failed = scheduler.execute(() => inFlight.promise, { signal });
+    const siblingOperation = vi.fn();
+    const sibling = scheduler.execute(siblingOperation, { signal });
+    const other = scheduler.execute(() => 'unrelated');
+    const error = new Error('Synthetic upstream failure');
+    const rejected = Promise.all([assert.rejects(failed, error), assert.rejects(sibling, error)]);
+
+    inFlight.reject(error);
+
+    await rejected;
+    assert.equal(await other, 'unrelated');
+    assert.equal(siblingOperation.mock.calls.length, 0);
+});
+
+test('refuses work when the signal is already aborted', async () => {
+    const operation = vi.fn();
+    const scheduler = new RedditRequestScheduler(createRequester());
+
+    await assert.rejects(scheduler.execute(operation, { signal: AbortSignal.abort() }), RedditRequestAbortedError);
+    assert.equal(operation.mock.calls.length, 0);
+});
+
+test('does not run an operation aborted just before it starts', async () => {
+    const operation = vi.fn();
+    const scheduler = new RedditRequestScheduler(createRequester());
+    const controller = new AbortController();
+    const job = scheduler.execute(operation, { signal: controller.signal });
+    controller.abort();
+
+    await assert.rejects(job, RedditRequestAbortedError);
+    assert.equal(await scheduler.execute(() => 'next'), 'next');
+    assert.equal(operation.mock.calls.length, 0);
 });
 
 test('removes queued work when its request is aborted', async () => {
@@ -172,16 +251,24 @@ test('removes queued work when its request is aborted', async () => {
 });
 
 test('does not dispatch another operation until an aborted in-flight call settles', async () => {
+    const dispatched = Promise.withResolvers();
     const inFlight = Promise.withResolvers();
     const scheduler = new RedditRequestScheduler(createRequester());
     const controller = new AbortController();
     let nextStarted = false;
-    const active = scheduler.execute(() => inFlight.promise, { signal: controller.signal });
+    const active = scheduler.execute(
+        () => {
+            dispatched.resolve(undefined);
+            return inFlight.promise;
+        },
+        { signal: controller.signal },
+    );
     const next = scheduler.execute(() => {
         nextStarted = true;
         return 'next';
     });
 
+    await dispatched.promise;
     controller.abort();
     await assert.rejects(active, (error) => error instanceof RedditRequestAbortedError);
     assert.equal(scheduler.activeJob !== null, true);
@@ -192,4 +279,55 @@ test('does not dispatch another operation until an aborted in-flight call settle
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(nextStarted, true);
     assert.equal(scheduler.activeJob, null);
+});
+
+test('cancels a transport call that is waiting for the request spacing interval', async () => {
+    vi.useFakeTimers();
+    const transport = vi.fn().mockResolvedValue({});
+    const requester = createRequester(transport);
+    const scheduler = new RedditRequestScheduler(requester, { minRequestIntervalMs: 100 });
+    const controller = new AbortController();
+
+    await requester.rawRequest({});
+    const job = scheduler.execute(() => requester.rawRequest({}), { signal: controller.signal });
+    const rejected = assert.rejects(job, RedditRequestAbortedError);
+    await vi.advanceTimersByTimeAsync(20);
+    controller.abort();
+    await rejected;
+    await vi.advanceTimersByTimeAsync(100);
+
+    assert.equal(transport.mock.calls.length, 1);
+    assert.equal(vi.getTimerCount(), 0);
+    assert.equal(await scheduler.execute(() => 'next'), 'next');
+});
+
+test('blocks further transport calls from an aborted in-flight operation', async () => {
+    const transport = vi.fn().mockResolvedValue({});
+    const requester = createRequester(transport);
+    const scheduler = new RedditRequestScheduler(requester);
+    const controller = new AbortController();
+    const dispatched = Promise.withResolvers();
+    const continueOperation = Promise.withResolvers();
+    const transportResult = Promise.withResolvers();
+    const job = scheduler.execute(
+        async () => {
+            dispatched.resolve(undefined);
+            await continueOperation.promise;
+            const request = requester.rawRequest({});
+            transportResult.resolve(request);
+            await request;
+        },
+        { signal: controller.signal },
+    );
+    const rejected = assert.rejects(job, RedditRequestAbortedError);
+
+    await dispatched.promise;
+    controller.abort();
+    await rejected;
+    const blocked = assert.rejects(transportResult.promise, RedditRequestAbortedError);
+    continueOperation.resolve(undefined);
+
+    await blocked;
+    assert.equal(transport.mock.calls.length, 0);
+    assert.equal(await scheduler.execute(() => 'next'), 'next');
 });
