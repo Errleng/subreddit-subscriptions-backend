@@ -191,7 +191,9 @@ test('expires queued work that waits too long and removes it from the queue', as
     const pending = scheduler.execute(() => Promise.resolve('expired'));
     const rejected = assert.rejects(pending, (error) => error instanceof RedditQueueOverloadError);
 
-    await vi.advanceTimersByTimeAsync(20);
+    await vi.advanceTimersByTimeAsync(19);
+    assert.equal(scheduler.pending.length, 1);
+    await vi.advanceTimersByTimeAsync(1);
     await rejected;
     inFlight.resolve('done');
     assert.equal(await active, 'done');
@@ -292,12 +294,14 @@ test('cancels a transport call that is waiting for the request spacing interval'
     const job = scheduler.execute(() => requester.rawRequest({}), { signal: controller.signal });
     const rejected = assert.rejects(job, RedditRequestAbortedError);
     await vi.advanceTimersByTimeAsync(20);
+    assert.equal(vi.getTimerCount(), 1);
     controller.abort();
     await rejected;
+    await vi.advanceTimersByTimeAsync(0);
+    assert.equal(vi.getTimerCount(), 0);
     await vi.advanceTimersByTimeAsync(100);
 
     assert.equal(transport.mock.calls.length, 1);
-    assert.equal(vi.getTimerCount(), 0);
     assert.equal(await scheduler.execute(() => 'next'), 'next');
 });
 
