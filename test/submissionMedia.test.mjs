@@ -124,6 +124,20 @@ test('uses preview video when the hosted video and oEmbed have no usable media',
     assert.equal(extractSubmissionMedia(submission).mediaVideo, videoUrl);
 });
 
+test('falls back to the image preview when upstream embed and video values are malformed', () => {
+    const submission = {
+        media_embed: { content: {} },
+        media: { oembed: { html: false, thumbnail_url: 42 }, reddit_video: { fallback_url: [] } },
+        preview: { images: [null, { source: { url: imageUrl } }] },
+    };
+    assert.deepEqual(extractSubmissionMedia(submission), {
+        imageUrls: [imageUrl],
+        mediaVideo: null,
+        mediaHtml: null,
+        num_images: 0,
+    });
+});
+
 test('uses another gallery preview when the preferred preview and source are missing', () => {
     const submission = {
         is_gallery: true,
