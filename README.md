@@ -31,7 +31,7 @@ Keep tests in `test/` with the `.test.mjs` suffix. The HTTP tests run the real E
 
 Vitest requires 90% coverage for statements, branches, and lines, and 93% for functions.
 
-TypeScript checks JavaScript through `checkJs` and emits no files. The existing JavaScript can still use implicit `any` values where types are missing. The compiler skips third-party declaration checking. This service runs JavaScript directly, so the build is a syntax check.
+TypeScript checks JavaScript through `checkJs` with strict mode, checked indexed access, exact optional properties, and control-flow checks. It emits no files and skips third-party declaration checking. This service runs JavaScript directly, so the build is a syntax check.
 
 ### Pre-commit and CI
 

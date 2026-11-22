@@ -52,7 +52,9 @@ function loadApp() {
     }
 }
 
+/** @type {import('node:http').Server} */
 let server;
+/** @type {string} */
 let origin;
 
 beforeAll(async () => {
@@ -84,6 +86,7 @@ afterEach(() => {
     vi.useRealTimers();
 });
 
+/** @param {string} path */
 async function request(path) {
     const [response] = await once(get(`${origin}/api${path}`, { agent: false }), 'response');
     return { status: response.statusCode, headers: response.headers, body: await text(response) };

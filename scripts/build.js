@@ -4,8 +4,10 @@ const { spawnSync } = require('child_process');
 
 const projectRoot = path.resolve(__dirname, '..');
 const ignoredDirectories = new Set(['.git', 'coverage', 'dist', 'node_modules']);
+/** @type {string[]} */
 const javascriptFiles = [];
 
+/** @param {string} directory */
 function collectJavaScriptFiles(directory) {
     const entries = fs.readdirSync(directory, { withFileTypes: true });
 
