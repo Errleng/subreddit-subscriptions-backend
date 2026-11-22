@@ -9,11 +9,18 @@ const { getErrorMessage, getErrorProperty } = require('../errorDetails');
 const {
     hasProp,
     isGallerySubmission,
+    getGalleryItems,
     getExpectedMediaError,
     extractSubmissionMedia,
     cachedMediaSatisfiesExpectedType,
     mergeMediaWithCache,
 } = require('./submissionMedia');
+
+/** @typedef {import('snoowrap').Submission} SnoowrapSubmission */
+/** @typedef {import('./submissionMedia').CachedMedia} CachedMedia */
+/** @typedef {Pick<SnoowrapSubmission, 'score' | 'upvote_ratio' | 'num_comments' | 'removed_by_category' | 'created_utc'>} SubmissionMetrics */
+/** @typedef {Pick<SnoowrapSubmission, 'id' | 'title' | 'url'> & SubmissionMetrics & import('./submissionMedia').MediaSubmission} SubmissionData */
+/** @typedef {{ id: string, title?: string, lastUpdateTime?: Date | string | number | null } & CachedMedia & Partial<SubmissionMetrics>} CachedSubmission */
 
 const MAX_ATTEMPTS = 4;
 const SORT_TIMES = /** @type {const} */ (['hour', 'day', 'week', 'month', 'year', 'all']);
@@ -32,6 +39,10 @@ function handleAsync(handler) {
     };
 }
 
+/**
+ * @param {import('node:http').IncomingMessage} req
+ * @param {import('node:http').ServerResponse} res
+ */
 function createRequestAbortController(req, res) {
     const controller = new AbortController();
     const abortIfDisconnected = () => {
@@ -127,8 +138,9 @@ function sendRouteError(res, error) {
     res.status(status).send({ error: message });
 }
 
+/** @param {AbortSignal} signal */
 function throwIfRequestAborted(signal) {
-    if (signal && signal.aborted) {
+    if (signal.aborted) {
         throw new redditRequestScheduler.RedditRequestAbortedError();
     }
 }
@@ -161,15 +173,18 @@ router.get(
 );
 
 /**
- * @param {{ num_images?: number } | null} cachedSubmission
+ * @param {SnoowrapSubmission} submission
+ * @param {CachedMedia | null} cachedSubmission
+ * @param {AbortSignal} signal
  */
-async function updateSubmissionMedia(submission, cachedSubmission = null, signal) {
+async function updateSubmissionMedia(submission, cachedSubmission, signal) {
     const startTime = performance.now();
     const galleryExpected =
         isGallerySubmission(submission) ||
         (cachedSubmission !== null &&
             Number.isInteger(cachedSubmission.num_images) &&
             (cachedSubmission.num_images ?? 0) > 0);
+    /** @type {SubmissionData} */
     let sourceSubmission = submission;
     let mediaData;
     let extractionError = null;
@@ -185,7 +200,11 @@ async function updateSubmissionMedia(submission, cachedSubmission = null, signal
         extractionError || getExpectedMediaError(submission, sourceSubmission, mediaData, galleryExpected);
     if (expectedMediaError && !cachedMediaSatisfiesExpectedType(submission, cachedSubmission)) {
         try {
-            sourceSubmission = await redditRequestScheduler.execute(() => submission.fetch(), { signal });
+            sourceSubmission = await redditRequestScheduler.execute(
+                // The fetched payload has submission data without Snoowrap's lazy proxy type.
+                () => /** @type {PromiseLike<SubmissionData>} */ (submission.fetch()),
+                { signal },
+            );
         } catch (error) {
             if (
                 error instanceof redditRequestScheduler.RedditRateLimitError ||
@@ -193,7 +212,7 @@ async function updateSubmissionMedia(submission, cachedSubmission = null, signal
                 isTimeoutCode(getErrorProperty(error, 'code')) ||
                 isTimeoutCode(getErrorProperty(getErrorProperty(error, 'cause'), 'code')) ||
                 getErrorProperty(error, 'name') === 'TimeoutError' ||
-                (signal && signal.aborted)
+                signal.aborted
             ) {
                 throw error;
             }
@@ -236,8 +255,10 @@ async function updateSubmissionMedia(submission, cachedSubmission = null, signal
     return result;
 }
 
+/** @param {CachedSubmission} submission */
 async function updateSubmissionInDb(submission) {
     const dbConnect = await db.getDb();
+    const numImages = submission.num_images ?? 0;
     const submissionObj = {
         lastUpdateTime: submission.lastUpdateTime,
         imageUrls: Array.isArray(submission.imageUrls) ? submission.imageUrls : [],
@@ -248,7 +269,7 @@ async function updateSubmissionInDb(submission) {
         score: submission.score,
         upvote_ratio: submission.upvote_ratio,
         num_comments: submission.num_comments,
-        num_images: Number.isInteger(submission.num_images) ? submission.num_images : 0,
+        num_images: Number.isInteger(numImages) ? numImages : 0,
         removed_by_category: submission.removed_by_category,
         created_utc: submission.created_utc,
     };
@@ -265,6 +286,11 @@ async function updateSubmissionInDb(submission) {
     }
 }
 
+/**
+ * @param {SnoowrapSubmission} snoowrapSubmission
+ * @param {CachedSubmission | null} dbSubmission
+ * @param {AbortSignal} signal
+ */
 async function updateOldSubmissionInDb(snoowrapSubmission, dbSubmission, signal) {
     const newUpdateTime = new Date();
     let isStale = false;
@@ -280,12 +306,12 @@ async function updateOldSubmissionInDb(snoowrapSubmission, dbSubmission, signal)
     }
 
     const cachedMediaIsIncomplete = !cachedMediaSatisfiesExpectedType(snoowrapSubmission, dbSubmission);
-    if (isStale || cachedMediaIsIncomplete) {
+    if (dbSubmission === null || isStale || cachedMediaIsIncomplete) {
         const mediaSubmission = await updateSubmissionMedia(snoowrapSubmission, dbSubmission, signal);
         throwIfRequestAborted(signal);
-        mediaSubmission.lastUpdateTime = newUpdateTime;
-        await updateSubmissionInDb(mediaSubmission);
-        return mediaSubmission;
+        const updatedSubmission = { ...mediaSubmission, lastUpdateTime: newUpdateTime };
+        await updateSubmissionInDb(updatedSubmission);
+        return updatedSubmission;
     }
 
     const updatedSubmission = {
@@ -297,14 +323,11 @@ async function updateOldSubmissionInDb(snoowrapSubmission, dbSubmission, signal)
         removed_by_category: snoowrapSubmission.removed_by_category,
         created_utc: snoowrapSubmission.created_utc,
     };
-    if (
-        isGallerySubmission(snoowrapSubmission) &&
-        hasProp(snoowrapSubmission, 'gallery_data') &&
-        Array.isArray(snoowrapSubmission.gallery_data.items) &&
-        snoowrapSubmission.gallery_data.items.length > 0
-    ) {
-        const cachedImageCount = Number.isInteger(dbSubmission.num_images) ? dbSubmission.num_images : 0;
-        updatedSubmission.num_images = Math.max(cachedImageCount, snoowrapSubmission.gallery_data.items.length);
+    const galleryItems = isGallerySubmission(snoowrapSubmission) ? getGalleryItems(snoowrapSubmission) : null;
+    if (galleryItems?.length) {
+        const numImages = dbSubmission.num_images ?? 0;
+        const cachedImageCount = Number.isInteger(numImages) ? numImages : 0;
+        updatedSubmission.num_images = Math.max(cachedImageCount, galleryItems.length);
     }
 
     throwIfRequestAborted(signal);
@@ -355,8 +378,11 @@ router.get(
             const listingOptions = { time: sortTime, limit: numSubmissions };
 
             const dbConnect = await db.getDb();
+            // The service owns these cache records. Older documents can omit media fields and metrics.
+            /** @type {import('mongodb').Collection<CachedSubmission>} */
             const submissionsCollection = dbConnect.collection(config.submissionsCollection);
             let numAttempts = 0;
+            /** @type {SnoowrapSubmission[]} */
             let longestData = [];
 
             while (true) {
@@ -385,7 +411,8 @@ router.get(
                             throw new redditRequestScheduler.RedditRequestAbortedError();
                         }
                         if (submission.is_self) {
-                            return submission;
+                            // Listing entries are already fetched, so the proxy does not act as a thenable.
+                            return /** @type {SubmissionData} */ (submission);
                         }
                         const query = { id: submission.id };
                         const cursor = submissionsCollection.find(query);
@@ -400,9 +427,9 @@ router.get(
                                 operationController.signal,
                             );
                             throwIfRequestAborted(operationController.signal);
-                            mediaSubmission.lastUpdateTime = new Date();
-                            await updateSubmissionInDb(mediaSubmission);
-                            return mediaSubmission;
+                            const updatedSubmission = { ...mediaSubmission, lastUpdateTime: new Date() };
+                            await updateSubmissionInDb(updatedSubmission);
+                            return updatedSubmission;
                         }
                         if (count === 1) {
                             const dbSubmission = await cursor.next();

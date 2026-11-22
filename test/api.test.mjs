@@ -207,6 +207,25 @@ test('refreshes stale cached media and writes a new cache timestamp', async () =
     );
 });
 
+test('rebuilds a cache record that disappears between the count and cursor read', async () => {
+    const id = 'image1';
+    const next = vi.fn().mockResolvedValue(null);
+    getTop.mockResolvedValue([{ id, post_hint: 'image', thumbnail: imageUrl }]);
+    collection.countDocuments.mockResolvedValue(1);
+    collection.find.mockReturnValue({ next });
+
+    const response = await request('/subreddit/example/top/day/1');
+
+    expect(response.status).toBe(200);
+    expect(JSON.parse(response.body)).toMatchObject([{ id, imageUrls: [imageUrl] }]);
+    expect(next).toHaveBeenCalledOnce();
+    expect(collection.updateOne).toHaveBeenCalledExactlyOnceWith(
+        { id },
+        { $set: expect.objectContaining({ imageUrls: [imageUrl], lastUpdateTime: expect.any(Date) }) },
+        { upsert: true },
+    );
+});
+
 test('preserves complete legacy gallery media and fills missing cache metadata', async () => {
     const cached = { id: 'gallery1', imageUrls: [imageUrl] };
     const post = {

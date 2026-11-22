@@ -45,7 +45,7 @@ function getOwnProperty(object, propertyName) {
  * @template {string} Key
  * @param {T} object
  * @param {Key} propertyName
- * @returns {object is T & Record<Key, Key extends keyof T ? NonNullable<T[Key]> : unknown>}
+ * @returns {object is T & Record<Key, Key extends keyof NonNullable<T> ? NonNullable<NonNullable<T>[Key]> : unknown>}
  */
 function hasProp(object, propertyName) {
     return getOwnProperty(object, propertyName) != null;
@@ -71,10 +71,16 @@ function selectPreviewResolution(resolutions) {
 }
 
 /** @param {MediaSubmission} submission */
+function getGalleryItems(submission) {
+    const items = getOwnProperty(getOwnProperty(submission, 'gallery_data'), 'items');
+    return isArray(items) ? items : null;
+}
+
+/** @param {MediaSubmission} submission */
 function getGalleryImageUrls(submission) {
     const context = `Gallery submission ${submission.id} (${submission.url})`;
-    const galleryImages = getOwnProperty(getOwnProperty(submission, 'gallery_data'), 'items');
-    if (!isArray(galleryImages) || galleryImages.length === 0) {
+    const galleryImages = getGalleryItems(submission);
+    if (galleryImages === null || galleryImages.length === 0) {
         throw new Error(`${context} is expected to have gallery_data.items but none were returned`);
     }
     const mediaMetadata = getOwnProperty(submission, 'media_metadata');
@@ -241,11 +247,11 @@ function cachedMediaSatisfiesExpectedType(submission, cachedSubmission) {
     const cachedImageUrls = Array.isArray(cachedSubmission.imageUrls) ? cachedSubmission.imageUrls : [];
     const imageCount = cachedSubmission.num_images ?? 0;
     const cachedImageCount = Number.isInteger(imageCount) && imageCount > 0 ? imageCount : cachedImageUrls.length;
-    const galleryItems = getOwnProperty(getOwnProperty(submission, 'gallery_data'), 'items');
     const galleryExpected = isGallerySubmission(submission) || cachedImageCount > 0;
 
     if (galleryExpected) {
-        if (isArray(galleryItems)) {
+        const galleryItems = getGalleryItems(submission);
+        if (galleryItems !== null) {
             return galleryItems.length > 0 ? cachedImageUrls.length >= galleryItems.length : cachedImageUrls.length > 0;
         }
         return cachedImageCount > 0 && cachedImageUrls.length >= cachedImageCount;
@@ -305,6 +311,7 @@ function mergeMediaWithCache(submission, cachedSubmission) {
 module.exports = {
     hasProp,
     isGallerySubmission,
+    getGalleryItems,
     getExpectedMediaError,
     extractSubmissionMedia,
     cachedMediaSatisfiesExpectedType,
