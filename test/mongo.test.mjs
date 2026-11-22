@@ -63,3 +63,24 @@ test('retries initialization when TTL index creation fails', async () => {
     expect(connect).toHaveBeenCalledTimes(2);
     expect(createIndex).toHaveBeenCalledTimes(2);
 });
+
+test('fails at startup when the MongoDB URI is missing', () => {
+    vi.stubEnv('MONGODB_URI', undefined);
+
+    expect(loadDatabase).toThrow('MONGODB_URI is required');
+});
+
+test('retries a failed startup connection and shares the default database with callers', async () => {
+    vi.stubEnv('MONGODB_DATABASE', undefined);
+    const connect = mockConnect().mockRejectedValueOnce(new Error('Synthetic connection failure'));
+    const createIndex = vi.spyOn(collectionPrototype, 'createIndex').mockResolvedValue('lastUpdateTime_1');
+    const database = loadDatabase();
+
+    await expect(database.connectToMongo()).rejects.toThrow('Synthetic connection failure');
+    expect(createIndex).not.toHaveBeenCalled();
+
+    await database.connectToMongo();
+    await expect(database.getDb()).resolves.toHaveProperty('databaseName', 'SubmissionsData');
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(createIndex).toHaveBeenCalledOnce();
+});
