@@ -6,7 +6,10 @@ const require = createRequire(import.meta.url);
 /** @type {typeof import('../api/submissionMedia.js')} */
 const media = require('../api/submissionMedia.js');
 
-const { extractSubmissionMedia, cachedMediaSatisfiesExpectedType, mergeMediaWithCache } = media;
+const { extractSubmissionMedia, getExpectedMediaError, cachedMediaSatisfiesExpectedType, mergeMediaWithCache } = media;
+const imageUrl = 'https://images.example/fixture.jpg';
+const videoUrl = 'https://videos.example/fixture.mp4';
+const embedHtml = '<iframe src="https://videos.example/embed"></iframe>';
 
 test('extracts every gallery image using each item media_id', () => {
     const submission = {
@@ -74,6 +77,95 @@ test('extracts hosted video media', () => {
     });
 });
 
+test('falls back to another preview when the preferred resolution and source are missing', () => {
+    const submission = {
+        preview: { images: [{ resolutions: [{ url: imageUrl }, {}] }] },
+        thumbnail: 'https://images.example/thumbnail.jpg',
+    };
+    assert.deepEqual(extractSubmissionMedia(submission).imageUrls, [imageUrl]);
+});
+
+test('uses a thumbnail when the preview has no usable image', () => {
+    const submission = { preview: { images: [{ source: { url: '' } }, {}] }, thumbnail: imageUrl };
+    assert.deepEqual(extractSubmissionMedia(submission).imageUrls, [imageUrl]);
+});
+
+test.each(['', 'default', 'nsfw'])('ignores the thumbnail placeholder %j', (thumbnail) => {
+    assert.deepEqual(extractSubmissionMedia({ thumbnail }).imageUrls, []);
+});
+
+test.each([
+    { media_embed: { content: embedHtml }, media: { oembed: { html: '<p>Lower-priority embed</p>' } } },
+    { media_embed: {}, media: { oembed: { html: embedHtml, thumbnail_url: imageUrl } } },
+])('extracts the available embed HTML from %j', (submission) => {
+    assert.deepEqual(extractSubmissionMedia(submission), {
+        imageUrls: [],
+        mediaVideo: null,
+        mediaHtml: embedHtml,
+        num_images: 0,
+    });
+});
+
+test('preserves the oEmbed thumbnail as the media fallback when no HTML is returned', () => {
+    const submission = { media: { oembed: { thumbnail_url: imageUrl } } };
+    assert.deepEqual(extractSubmissionMedia(submission), {
+        imageUrls: [],
+        mediaVideo: null,
+        mediaHtml: imageUrl,
+        num_images: 0,
+    });
+});
+
+test('uses preview video when the hosted video and oEmbed have no usable media', () => {
+    const submission = {
+        media: { reddit_video: {}, oembed: {} },
+        preview: { reddit_video_preview: { fallback_url: videoUrl } },
+    };
+    assert.equal(extractSubmissionMedia(submission).mediaVideo, videoUrl);
+});
+
+test('uses another gallery preview when the preferred preview and source are missing', () => {
+    const submission = {
+        is_gallery: true,
+        gallery_data: { items: [{ media_id: 'first' }] },
+        media_metadata: { first: { p: [{ u: imageUrl }, {}] } },
+    };
+    assert.deepEqual(extractSubmissionMedia(submission).imageUrls, [imageUrl]);
+});
+
+test.each([
+    { items: null, metadata: {}, message: /expected to have gallery_data.items/ },
+    { items: [], metadata: {}, message: /expected to have gallery_data.items/ },
+    { items: [{ media_id: 'first' }], metadata: undefined, message: /no media_metadata/ },
+    { items: [{ media_id: 'first' }], metadata: 'invalid', message: /no media_metadata/ },
+    { items: [{}], metadata: {}, message: /without media_id/ },
+    { items: [{ media_id: 'first' }], metadata: {}, message: /missing media_metadata for gallery image first/ },
+    { items: [{ media_id: 'first' }], metadata: { first: {} }, message: /no image URL for gallery image first/ },
+    {
+        items: [{ media_id: 'first' }],
+        metadata: { first: { s: { u: '' } } },
+        message: /no image URL for gallery image first/,
+    },
+])('rejects incomplete gallery data with $message', ({ items, metadata, message }) => {
+    const submission = {
+        id: 'gallery-fixture',
+        is_gallery: true,
+        gallery_data: { items },
+        media_metadata: metadata,
+    };
+    assert.throws(() => extractSubmissionMedia(submission), message);
+    assert.match(getExpectedMediaError(submission, submission, { imageUrls: [] }, false)?.message ?? '', message);
+});
+
+test.each([
+    [{ post_hint: 'image' }, /no image media data/],
+    [{ is_video: true }, /no video or embed metadata/],
+    [{ post_hint: 'rich:video', preview: { reddit_video_preview: {} } }, /no video or embed metadata/],
+])('reports missing expected media for %j', (submission, message) => {
+    const result = extractSubmissionMedia(submission);
+    assert.match(getExpectedMediaError(submission, submission, result, false)?.message ?? '', message);
+});
+
 test('checks gallery cache against the current item count and preserves fuller cached media', () => {
     const listingSubmission = {
         id: 'gallery1',
@@ -102,4 +194,33 @@ test('checks gallery cache against the current item count and preserves fuller c
         imageUrls: fullCache.imageUrls,
         num_images: 2,
     });
+});
+
+test.each([
+    [{ is_gallery: true, gallery_data: { items: [] } }, { imageUrls: [imageUrl] }, true],
+    [{ is_gallery: true, gallery_data: { items: [] } }, { imageUrls: [] }, false],
+    [{ is_gallery: true }, { imageUrls: [] }, false],
+    [{ is_gallery: true }, { num_images: 2, imageUrls: [imageUrl] }, false],
+    [{ post_hint: 'image' }, { imageUrls: [] }, false],
+    [{ post_hint: 'rich:video' }, { mediaVideo: videoUrl }, true],
+    [{ is_video: true }, { mediaVideo: '', mediaHtml: embedHtml }, true],
+    [{ post_hint: 'hosted:video' }, { mediaHtml: '' }, false],
+    [{ is_video: true }, { mediaHtml: null }, false],
+])('checks whether cached media satisfies %j with %j', (submission, cache, expected) => {
+    assert.equal(cachedMediaSatisfiesExpectedType(submission, cache), expected);
+});
+
+test('restores gallery count from legacy cached images', () => {
+    const submission = { is_gallery: true, num_images: 0 };
+    assert.deepEqual(mergeMediaWithCache(submission, { imageUrls: [imageUrl] }), {
+        ...submission,
+        num_images: 1,
+        imageUrls: [imageUrl],
+    });
+});
+
+test('preserves a new video and restores missing embed HTML from the cache', () => {
+    const submission = { mediaVideo: videoUrl, mediaHtml: null };
+    const cached = { mediaVideo: 'https://videos.example/older.mp4', mediaHtml: embedHtml };
+    assert.deepEqual(mergeMediaWithCache(submission, cached), { mediaVideo: videoUrl, mediaHtml: embedHtml });
 });
