@@ -1,6 +1,7 @@
 const express = require('express');
 const snoowrap = require('snoowrap');
 const fs = require('fs');
+const { getErrorProperty } = require('./errorDetails');
 require('dotenv').config();
 
 const PORT = 8080;
@@ -12,7 +13,7 @@ let secrets = null;
 try {
     secrets = fs.readFileSync(secretsPath, 'utf8');
 } catch (err) {
-    if (err.code !== 'ENOENT') {
+    if (getErrorProperty(err, 'code') !== 'ENOENT') {
         console.error('Error when reading secrets file', err);
     }
 }

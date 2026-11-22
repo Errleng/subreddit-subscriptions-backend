@@ -1,12 +1,13 @@
 const snoowrap = require('snoowrap');
 const fs = require('fs');
+const { getErrorProperty } = require('./errorDetails');
 
 const secretsPath = './secrets.json';
 let secrets = null;
 try {
     secrets = fs.readFileSync(secretsPath, 'utf8');
 } catch (err) {
-    if (err.code !== 'ENOENT') {
+    if (getErrorProperty(err, 'code') !== 'ENOENT') {
         console.error('Error when reading secrets file', err);
     }
 }

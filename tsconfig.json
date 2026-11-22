@@ -10,7 +10,6 @@
         "skipLibCheck": true,
         "strict": true,
         "noImplicitAny": false,
-        "useUnknownInCatchVariables": false,
         "noUncheckedIndexedAccess": true,
         "exactOptionalPropertyTypes": true,
         "noImplicitReturns": true,

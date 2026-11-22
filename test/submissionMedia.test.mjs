@@ -180,7 +180,9 @@ test.each([
 test('validates gallery media in the returned detail when the listing identifies a gallery', () => {
     const listing = { id: 'gallery-fixture', is_gallery: true };
     const detail = { id: listing.id, gallery_data: { items: [{ media_id: 'first' }] } };
-    assert.match(getExpectedMediaError(listing, detail, { imageUrls: [] }, false)?.message ?? '', /no media_metadata/);
+    const error = getExpectedMediaError(listing, detail, { imageUrls: [] }, false);
+    assert.ok(error instanceof Error);
+    assert.match(error.message, /no media_metadata/);
 
     const completeDetail = { ...detail, media_metadata: { first: { s: { u: imageUrl } } } };
     const mediaData = extractSubmissionMedia(completeDetail, true);
@@ -193,7 +195,9 @@ test.each([
     [{ post_hint: 'rich:video', preview: { reddit_video_preview: {} } }, /no video or embed metadata/],
 ])('reports missing expected media for %j', (submission, message) => {
     const result = extractSubmissionMedia(submission);
-    assert.match(getExpectedMediaError(submission, submission, result, false)?.message ?? '', message);
+    const error = getExpectedMediaError(submission, submission, result, false);
+    assert.ok(error instanceof Error);
+    assert.match(error.message, message);
 });
 
 test('checks gallery cache against the current item count and preserves fuller cached media', () => {

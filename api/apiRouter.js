@@ -5,6 +5,7 @@ const reddit = require('../reddit');
 const redditRequestScheduler = require('../redditRequestSchedulerInstance');
 const config = require('../config');
 const db = require('../mongo');
+const { getErrorMessage, getErrorProperty } = require('../errorDetails');
 const {
     hasProp,
     isGallerySubmission,
@@ -51,6 +52,12 @@ function createRequestAbortController(req, res) {
     };
 }
 
+/** @param {unknown} code */
+function isTimeoutCode(code) {
+    return code === 'ETIMEDOUT' || code === 'ESOCKETTIMEDOUT';
+}
+
+/** @param {unknown} error */
 function getErrorStatus(error) {
     if (error instanceof redditRequestScheduler.RedditRateLimitError) {
         return 429;
@@ -61,29 +68,39 @@ function getErrorStatus(error) {
     if (error instanceof SubmissionMediaError) {
         return 502;
     }
-    const errorCode = error.code || (error.cause && error.cause.code);
-    if (errorCode === 'ETIMEDOUT' || errorCode === 'ESOCKETTIMEDOUT' || error.name === 'TimeoutError') {
+    const errorCode = getErrorProperty(error, 'code') || getErrorProperty(getErrorProperty(error, 'cause'), 'code');
+    if (isTimeoutCode(errorCode) || getErrorProperty(error, 'name') === 'TimeoutError') {
         return 504;
     }
 
-    const upstreamStatus = Number(error.statusCode || (error.response && error.response.statusCode));
+    const upstreamResponse = getErrorProperty(error, 'response');
+    const upstreamStatus = Number(
+        getErrorProperty(error, 'statusCode') || getErrorProperty(upstreamResponse, 'statusCode'),
+    );
     if (upstreamStatus === 404) {
         return upstreamStatus;
     }
     if (upstreamStatus >= 400) {
         // Preserve the route's own invalid-parameter response, but report
         // failures returned by Reddit as a bad gateway.
-        if (upstreamStatus === 400 && !error.response) {
+        if (upstreamStatus === 400 && !upstreamResponse) {
             return 400;
         }
         return 502;
     }
-    if (errorCode && ['ECONNRESET', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH', 'ENOTFOUND'].includes(errorCode)) {
+    if (
+        typeof errorCode === 'string' &&
+        ['ECONNRESET', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH', 'ENOTFOUND'].includes(errorCode)
+    ) {
         return 502;
     }
     return 500;
 }
 
+/**
+ * @param {import('express').Response} res
+ * @param {unknown} error
+ */
 function sendRouteError(res, error) {
     if (res.destroyed || res.headersSent) {
         return;
@@ -91,14 +108,14 @@ function sendRouteError(res, error) {
 
     const status = getErrorStatus(error);
     if (status === 429 || status === 503) {
-        const retryAfterSeconds = Number.isFinite(error.retryAfterSeconds)
-            ? Math.max(1, Math.ceil(error.retryAfterSeconds))
-            : 5;
+        const delay = getErrorProperty(error, 'retryAfterSeconds');
+        const retryAfterSeconds =
+            typeof delay === 'number' && Number.isFinite(delay) ? Math.max(1, Math.ceil(delay)) : 5;
         res.set('Retry-After', String(retryAfterSeconds));
     }
 
     if (status >= 500) {
-        console.error('Reddit route failed:', error.message);
+        console.error('Reddit route failed:', getErrorMessage(error));
     }
 
     const message =
@@ -171,10 +188,9 @@ async function updateSubmissionMedia(submission, cachedSubmission = null, signal
             if (
                 error instanceof redditRequestScheduler.RedditRateLimitError ||
                 error instanceof redditRequestScheduler.RedditQueueOverloadError ||
-                error.code === 'ETIMEDOUT' ||
-                error.code === 'ESOCKETTIMEDOUT' ||
-                (error.cause && ['ETIMEDOUT', 'ESOCKETTIMEDOUT'].includes(error.cause.code)) ||
-                error.name === 'TimeoutError' ||
+                isTimeoutCode(getErrorProperty(error, 'code')) ||
+                isTimeoutCode(getErrorProperty(getErrorProperty(error, 'cause'), 'code')) ||
+                getErrorProperty(error, 'name') === 'TimeoutError' ||
                 (signal && signal.aborted)
             ) {
                 throw error;
@@ -188,14 +204,14 @@ async function updateSubmissionMedia(submission, cachedSubmission = null, signal
             mediaData = extractSubmissionMedia(sourceSubmission, galleryExpected);
         } catch (error) {
             throw new SubmissionMediaError(
-                `Could not extract expected media for submission ${submission.id} (${submission.url}): ${error.message}`,
+                `Could not extract expected media for submission ${submission.id} (${submission.url}): ${getErrorMessage(error)}`,
             );
         }
 
         expectedMediaError = getExpectedMediaError(submission, sourceSubmission, mediaData, galleryExpected);
         if (expectedMediaError) {
             throw new SubmissionMediaError(
-                `Could not extract expected media for submission ${submission.id} (${submission.url}): ${expectedMediaError.message}`,
+                `Could not extract expected media for submission ${submission.id} (${submission.url}): ${getErrorMessage(expectedMediaError)}`,
             );
         }
         console.log(`Fetched missing media for submission ${submission.id} - ${submission.title}`);

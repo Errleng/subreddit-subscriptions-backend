@@ -8,7 +8,7 @@ export default defineConfig({
         allowOnly: false,
         coverage: {
             provider: 'v8',
-            include: ['api/**/*.js', 'config.js', 'index.js', 'mongo.js', 'reddit*.js'],
+            include: ['api/**/*.js', 'config.js', 'errorDetails.js', 'index.js', 'mongo.js', 'reddit*.js'],
             reporter: ['text', 'html', 'json-summary'],
             thresholds: {
                 statements: 90,
