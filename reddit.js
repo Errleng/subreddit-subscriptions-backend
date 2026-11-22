@@ -1,32 +1,16 @@
 const snoowrap = require('snoowrap');
-const fs = require('fs');
-const { getErrorProperty } = require('./errorDetails');
+const readRedditCredentials = require('./redditCredentials');
 
-const secretsPath = './secrets.json';
-let secrets = null;
-try {
-    secrets = fs.readFileSync(secretsPath, 'utf8');
-} catch (err) {
-    if (getErrorProperty(err, 'code') !== 'ENOENT') {
-        console.error('Error when reading secrets file', err);
-    }
-}
-
-if (secrets === null) {
-    secrets = {
-        clientId: process.env.REDDIT_CLIENT,
-        clientSecret: process.env.REDDIT_SECRET,
-        refreshToken: process.env.REDDIT_REFRESH_TOKEN,
-    };
-} else {
-    secrets = JSON.parse(secrets);
+const { clientId, clientSecret, refreshToken } = readRedditCredentials();
+if (clientSecret === undefined || refreshToken === undefined) {
+    throw new Error('The Reddit client secret and refresh token are required to start the API');
 }
 
 const reddit = new snoowrap({
     userAgent: 'personal user agent for personal app for accessibility',
-    clientId: secrets.clientId,
-    clientSecret: secrets.clientSecret,
-    refreshToken: secrets.refreshToken,
+    clientId,
+    clientSecret,
+    refreshToken,
 });
 const requestTimeoutMs = 30000;
 reddit.config({
@@ -41,6 +25,8 @@ reddit.config({
 
 // Snoowrap applies requestTimeout to authenticated API calls, but not to the
 // credentialed request it uses to refresh an OAuth access token.
+// Its declarations use the unbundled request package types. The wrapper reads only timeout.
+/** @type {(options: { timeout?: number, [option: string]: unknown }) => Promise<unknown>} */
 const rawRequest = reddit.rawRequest.bind(reddit);
 Object.assign(reddit, {
     /** @type {typeof rawRequest} */
