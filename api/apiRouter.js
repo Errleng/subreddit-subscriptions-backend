@@ -21,8 +21,9 @@ class SubmissionMediaError extends Error {}
 
 /**
  * Express 4 expects a synchronous handler and does not forward rejected promises.
- * @param {(req: import('express').Request, res: import('express').Response) => Promise<void>} handler
- * @returns {import('express').RequestHandler}
+ * @template Params
+ * @param {(req: import('express').Request<Params>, res: import('express').Response) => Promise<void>} handler
+ * @returns {import('express').RequestHandler<Params>}
  */
 function handleAsync(handler) {
     return (req, res, next) => {

@@ -48,7 +48,8 @@ app.get('/', (req, res) => {
     const code = req.query.code;
 
     if (typeof code !== 'string' || !code) {
-        return res.send('No code found in the query parameters.');
+        res.send('No code found in the query parameters.');
+        return;
     }
 
     snoowrap
