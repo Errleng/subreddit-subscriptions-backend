@@ -16,5 +16,5 @@
         "noUnusedLocals": true,
         "noUnusedParameters": true
     },
-    "include": ["*.js", "api/**/*.js", "scripts/**/*.js", "test/**/*.mjs", "vitest.config.mjs", "types/**/*.d.ts"]
+    "include": ["*.js", "api/**/*.js", "scripts/**/*.js", "vitest.config.mjs", "types/**/*.d.ts"]
 }

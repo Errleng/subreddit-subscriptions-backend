@@ -9,7 +9,7 @@
         "devstart": "node --watch ./bin/www",
         "test:watch": "vitest",
         "test:coverage": "vitest run --coverage",
-        "typecheck": "tsc",
+        "typecheck": "tsc -p tsconfig.json && tsc -p test/tsconfig.json",
         "lint": "oxlint .",
         "lint:fix": "oxlint --fix .",
         "format": "oxfmt --write .",
