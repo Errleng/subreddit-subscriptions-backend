@@ -17,6 +17,7 @@ const getNew = vi.fn();
 const getRising = vi.fn();
 const getControversial = vi.fn();
 const about = vi.fn();
+const subreddit = { fetch: about, getTop, getHot, getNew, getRising, getControversial };
 const collection = {
     find: vi.fn(),
     countDocuments: vi.fn(),
@@ -72,7 +73,7 @@ afterAll(async () => {
 
 beforeEach(() => {
     vi.resetAllMocks();
-    getSubreddit.mockReturnValue({ fetch: about, getTop, getHot, getNew, getRising, getControversial });
+    getSubreddit.mockReturnValue(subreddit);
     about.mockResolvedValue({});
     collection.countDocuments.mockResolvedValue(0);
     collection.updateOne.mockResolvedValue({});
@@ -114,19 +115,22 @@ test.each(['/subreddit/example/invalid/day/1', '/subreddit/example/top/invalid/1
 );
 
 test.each([
-    ['hot', getHot],
-    ['new', getNew],
-    ['rising', getRising],
-    ['controversial', getControversial],
-])('dispatches the %s sort with the selected time and limit', async (sort, getListing) => {
+    ['hot', 'fixture_hot', getHot],
+    ['new', 'fixture_new', getNew],
+    ['top', 'fixture_top', getTop],
+    ['rising', 'fixture_rising', getRising],
+    ['controversial', 'fixture_controversial', getControversial],
+])('dispatches the %s sort for %s with the selected time and limit', async (sort, name, getListing) => {
     const post = { id: 'text1', is_self: true };
     getListing.mockResolvedValue([post]);
 
-    const response = await request(`/subreddit/example/${sort}/week/1`);
+    const response = await request(`/subreddit/${name}/${sort}/week/1`);
 
     expect(response.status).toBe(200);
     expect(JSON.parse(response.body)).toEqual([post]);
+    expect(getSubreddit).toHaveBeenCalledExactlyOnceWith(name);
     expect(getListing).toHaveBeenCalledExactlyOnceWith({ time: 'week', limit: 1 });
+    expect(getListing.mock.contexts[0]).toBe(subreddit);
     expect(collection.find).not.toHaveBeenCalled();
 });
 
