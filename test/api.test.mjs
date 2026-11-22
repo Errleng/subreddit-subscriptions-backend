@@ -2,6 +2,7 @@ import { once } from 'node:events';
 import { createServer, get } from 'node:http';
 import Module, { createRequire } from 'node:module';
 import { text } from 'node:stream/consumers';
+import { setImmediate } from 'node:timers/promises';
 import { afterAll, beforeAll, beforeEach, expect, test, vi } from 'vitest';
 
 const require = createRequire(import.meta.url);
@@ -11,6 +12,10 @@ const rawRequest = async () => {
     throw new Error('Unexpected network request');
 };
 const getTop = vi.fn();
+const getHot = vi.fn();
+const getNew = vi.fn();
+const getRising = vi.fn();
+const getControversial = vi.fn();
 const about = vi.fn();
 const collection = {
     find: vi.fn(),
@@ -67,7 +72,7 @@ afterAll(async () => {
 
 beforeEach(() => {
     vi.resetAllMocks();
-    getSubreddit.mockReturnValue({ fetch: about, getTop });
+    getSubreddit.mockReturnValue({ fetch: about, getTop, getHot, getNew, getRising, getControversial });
     about.mockResolvedValue({});
     collection.countDocuments.mockResolvedValue(0);
     collection.updateOne.mockResolvedValue({});
@@ -108,6 +113,23 @@ test.each(['/subreddit/example/invalid/day/1', '/subreddit/example/top/invalid/1
     },
 );
 
+test.each([
+    ['hot', getHot],
+    ['new', getNew],
+    ['rising', getRising],
+    ['controversial', getControversial],
+])('dispatches the %s sort with the selected time and limit', async (sort, getListing) => {
+    const post = { id: 'text1', is_self: true };
+    getListing.mockResolvedValue([post]);
+
+    const response = await request(`/subreddit/example/${sort}/week/1`);
+
+    expect(response.status).toBe(200);
+    expect(JSON.parse(response.body)).toEqual([post]);
+    expect(getListing).toHaveBeenCalledExactlyOnceWith({ time: 'week', limit: 1 });
+    expect(collection.find).not.toHaveBeenCalled();
+});
+
 test('retries a short listing and saves extracted media for new posts', async () => {
     const textPost = { id: 'text1', is_self: true, title: 'Example text post' };
     const imagePost = {
@@ -146,10 +168,101 @@ test('uses cached media and refreshes metrics from the listing', async () => {
     );
 });
 
-test('returns a public 504 when the upstream request times out', async () => {
-    about.mockRejectedValue(Object.assign(new Error('Upstream timed out'), { code: 'ETIMEDOUT' }));
+test('refreshes stale cached media and writes a new cache timestamp', async () => {
+    const lastUpdateTime = new Date('2000-01-01T00:00:00.000Z');
+    const cached = { id: 'image1', imageUrls: ['https://images.example/old.jpg'], lastUpdateTime };
+    const post = { id: cached.id, post_hint: 'image', thumbnail: imageUrl, score: 4 };
+    getTop.mockResolvedValue([post]);
+    collection.countDocuments.mockResolvedValue(1);
+    collection.find.mockReturnValue({ next: async () => cached });
+
+    const response = await request('/subreddit/example/top/day/1');
+
+    expect(response.status).toBe(200);
+    const [result] = JSON.parse(response.body);
+    expect(result).toMatchObject({ id: cached.id, imageUrls: [imageUrl], score: 4 });
+    expect(Date.parse(result.lastUpdateTime)).toBeGreaterThan(lastUpdateTime.getTime());
+    expect(collection.updateOne).toHaveBeenCalledExactlyOnceWith(
+        { id: cached.id },
+        { $set: expect.objectContaining({ imageUrls: [imageUrl], lastUpdateTime: new Date(result.lastUpdateTime) }) },
+        { upsert: true },
+    );
+});
+
+test('preserves complete legacy gallery media and fills missing cache metadata', async () => {
+    const cached = { id: 'gallery1', imageUrls: [imageUrl] };
+    const post = {
+        id: cached.id,
+        is_gallery: true,
+        gallery_data: { items: [{ media_id: 'first' }] },
+        score: 9,
+        fetch: vi.fn(),
+    };
+    getTop.mockResolvedValue([post]);
+    collection.countDocuments.mockResolvedValue(1);
+    collection.find.mockReturnValue({ next: async () => cached });
+
+    const response = await request('/subreddit/example/top/day/1');
+
+    expect(response.status).toBe(200);
+    expect(JSON.parse(response.body)).toMatchObject([
+        { id: cached.id, imageUrls: [imageUrl], num_images: 1, score: 9, lastUpdateTime: expect.any(String) },
+    ]);
+    expect(post.fetch).not.toHaveBeenCalled();
+    expect(collection.updateOne).toHaveBeenCalledExactlyOnceWith(
+        { id: cached.id },
+        { $set: expect.objectContaining({ imageUrls: [imageUrl], num_images: 1, lastUpdateTime: expect.any(Date) }) },
+        { upsert: true },
+    );
+});
+
+test('uses the cached gallery count to recover media when the listing lacks the gallery flag', async () => {
+    const cached = { id: 'gallery1', imageUrls: [], num_images: 1, lastUpdateTime: new Date() };
+    const fetch = vi.fn().mockResolvedValue({
+        id: cached.id,
+        gallery_data: { items: [{ media_id: 'first' }] },
+        media_metadata: { first: { s: { u: imageUrl } } },
+    });
+    getTop.mockResolvedValue([{ id: cached.id, fetch }]);
+    collection.countDocuments.mockResolvedValue(1);
+    collection.find.mockReturnValue({ next: async () => cached });
+
+    const response = await request('/subreddit/example/top/day/1');
+
+    expect(response.status).toBe(200);
+    expect(JSON.parse(response.body)).toMatchObject([{ id: cached.id, imageUrls: [imageUrl], num_images: 1 }]);
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(collection.updateOne).toHaveBeenCalledExactlyOnceWith(
+        { id: cached.id },
+        { $set: expect.objectContaining({ imageUrls: [imageUrl], num_images: 1 }) },
+        { upsert: true },
+    );
+});
+
+test.each([
+    { failure: { code: 'ETIMEDOUT' }, status: 504 },
+    { failure: { code: 'ESOCKETTIMEDOUT' }, status: 504 },
+    { failure: { name: 'TimeoutError' }, status: 504 },
+    { failure: { cause: { code: 'ECONNRESET' } }, status: 502 },
+    { failure: { response: { statusCode: 400 } }, status: 502 },
+    { failure: { statusCode: 503 }, status: 502 },
+])('returns a public $status for upstream failure $failure', async ({ failure, status }) => {
+    about.mockRejectedValue(Object.assign(new Error('Synthetic upstream failure'), failure));
+
     const response = await request('/valid/subreddit/example');
-    expect(response.status).toBe(504);
+
+    expect(response.status).toBe(status);
+    expect(JSON.parse(response.body)).toEqual({ error: 'Reddit request failed' });
+});
+
+test('returns a retry interval when the scheduler rejects an overloaded request', async () => {
+    const { RedditQueueOverloadError } = require('../redditRequestScheduler.js');
+    about.mockRejectedValue(new RedditQueueOverloadError());
+
+    const response = await request('/valid/subreddit/example');
+
+    expect(response.status).toBe(503);
+    expect(response.headers['retry-after']).toBe('5');
     expect(JSON.parse(response.body)).toEqual({ error: 'Reddit request failed' });
 });
 
@@ -207,6 +320,83 @@ test('reports missing media after a detail fetch also returns an incomplete gall
 
     expect(response.status).toBe(502);
     expect(JSON.parse(response.body)).toEqual({ error: expect.stringContaining('Could not extract expected media') });
+    expect(collection.updateOne).not.toHaveBeenCalled();
+});
+
+test('reports missing video when the detail has no usable embed metadata', async () => {
+    const post = { id: 'video1', post_hint: 'hosted:video', url: 'https://videos.example/post' };
+    const fetch = vi.fn().mockResolvedValue({ ...post, media: { reddit_video: {} } });
+    getTop.mockResolvedValue([{ ...post, fetch }]);
+
+    const response = await request('/subreddit/example/top/day/1');
+
+    expect(response.status).toBe(502);
+    expect(JSON.parse(response.body)).toEqual({ error: expect.stringContaining('has no video or embed metadata') });
+    expect(collection.updateOne).not.toHaveBeenCalled();
+});
+
+test.each([
+    { failure: new Error('Synthetic detail failure'), status: 502, message: 'Could not fetch expected media' },
+    {
+        failure: new Error('Synthetic detail timeout', { cause: { code: 'ESOCKETTIMEDOUT' } }),
+        status: 504,
+        message: 'Reddit request failed',
+    },
+])('reports $status when fetching missing media fails with $failure', async ({ failure, status, message }) => {
+    const fetch = vi.fn().mockRejectedValue(failure);
+    getTop.mockResolvedValue([{ id: 'image1', post_hint: 'image', url: imageUrl, fetch }]);
+
+    const response = await request('/subreddit/example/top/day/1');
+
+    expect(response.status).toBe(status);
+    expect(JSON.parse(response.body)).toEqual({ error: expect.stringContaining(message) });
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(collection.updateOne).not.toHaveBeenCalled();
+});
+
+test('rejects duplicate cache records without updating either record', async () => {
+    const id = 'image1';
+    const toArray = vi.fn().mockResolvedValue([{ id }, { id }]);
+    getTop.mockResolvedValue([{ id }]);
+    collection.countDocuments.mockResolvedValue(2);
+    collection.find.mockReturnValue({ toArray });
+
+    const response = await request('/subreddit/example/top/day/1');
+
+    expect(response.status).toBe(500);
+    expect(JSON.parse(response.body)).toEqual({ error: 'Reddit request failed' });
+    expect(toArray).toHaveBeenCalledOnce();
+    expect(collection.updateOne).not.toHaveBeenCalled();
+});
+
+test('skips media fetches and cache writes when the client disconnects during a cache lookup', async () => {
+    const lookupStarted = Promise.withResolvers();
+    const lookup = Promise.withResolvers();
+    const responseClosed = Promise.withResolvers();
+    const fetch = vi.fn();
+    getTop.mockResolvedValue([{ id: 'image1', post_hint: 'image', fetch }]);
+    collection.countDocuments.mockImplementation(() => {
+        lookupStarted.resolve(undefined);
+        return lookup.promise;
+    });
+    server.once('request', (_request, response) => {
+        response.once('close', () => responseClosed.resolve(undefined));
+    });
+
+    const client = get(`${origin}/api/subreddit/example/top/day/1`, { agent: false });
+    const clientError = once(client, 'error');
+    try {
+        await lookupStarted.promise;
+        client.destroy();
+        await Promise.all([clientError, responseClosed.promise]);
+    } finally {
+        client.destroy();
+        lookup.resolve(0);
+    }
+
+    // Let the handler resume after the cache lookup resolves.
+    await setImmediate();
+    expect(fetch).not.toHaveBeenCalled();
     expect(collection.updateOne).not.toHaveBeenCalled();
 });
 
