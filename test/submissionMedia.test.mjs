@@ -134,19 +134,40 @@ test('uses another gallery preview when the preferred preview and source are mis
 });
 
 test.each([
-    { items: null, metadata: {}, message: /expected to have gallery_data.items/ },
-    { items: [], metadata: {}, message: /expected to have gallery_data.items/ },
-    { items: [{ media_id: 'first' }], metadata: undefined, message: /no media_metadata/ },
-    { items: [{ media_id: 'first' }], metadata: 'invalid', message: /no media_metadata/ },
-    { items: [{}], metadata: {}, message: /without media_id/ },
-    { items: [{ media_id: 'first' }], metadata: {}, message: /missing media_metadata for gallery image first/ },
-    { items: [{ media_id: 'first' }], metadata: { first: {} }, message: /no image URL for gallery image first/ },
+    { name: 'null items', items: null, metadata: {}, message: /expected to have gallery_data.items/ },
+    { name: 'empty items', items: [], metadata: {}, message: /expected to have gallery_data.items/ },
     {
+        name: 'missing metadata',
+        items: [{ media_id: 'first' }],
+        metadata: undefined,
+        message: /no media_metadata/,
+    },
+    {
+        name: 'non-object metadata',
+        items: [{ media_id: 'first' }],
+        metadata: 'invalid',
+        message: /no media_metadata/,
+    },
+    { name: 'missing item ID', items: [{}], metadata: {}, message: /without media_id/ },
+    {
+        name: 'missing item metadata',
+        items: [{ media_id: 'first' }],
+        metadata: {},
+        message: /missing media_metadata for gallery image first/,
+    },
+    {
+        name: 'missing image URL',
+        items: [{ media_id: 'first' }],
+        metadata: { first: {} },
+        message: /no image URL for gallery image first/,
+    },
+    {
+        name: 'empty image URL',
         items: [{ media_id: 'first' }],
         metadata: { first: { s: { u: '' } } },
         message: /no image URL for gallery image first/,
     },
-])('rejects incomplete gallery data with $message', ({ items, metadata, message }) => {
+])('rejects incomplete gallery data with $name', ({ items, metadata, message }) => {
     const submission = {
         id: 'gallery-fixture',
         is_gallery: true,
@@ -154,7 +175,16 @@ test.each([
         media_metadata: metadata,
     };
     assert.throws(() => extractSubmissionMedia(submission), message);
-    assert.match(getExpectedMediaError(submission, submission, { imageUrls: [] }, false)?.message ?? '', message);
+});
+
+test('validates gallery media in the returned detail when the listing identifies a gallery', () => {
+    const listing = { id: 'gallery-fixture', is_gallery: true };
+    const detail = { id: listing.id, gallery_data: { items: [{ media_id: 'first' }] } };
+    assert.match(getExpectedMediaError(listing, detail, { imageUrls: [] }, false)?.message ?? '', /no media_metadata/);
+
+    const completeDetail = { ...detail, media_metadata: { first: { s: { u: imageUrl } } } };
+    const mediaData = extractSubmissionMedia(completeDetail, true);
+    assert.equal(getExpectedMediaError(listing, completeDetail, mediaData, false), null);
 });
 
 test.each([
