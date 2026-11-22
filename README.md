@@ -45,7 +45,11 @@ git config --local core.hooksPath .githooks
 
 The hook runs `npm run check` with the Node version in your shell. If the clone has existing hooks, integrate the check into that setup.
 
-The Build and Test workflow installs from the lockfile on the Node version in `.nvmrc` and runs `npm run check`. Secret Scan uses pinned Gitleaks, scans merge diffs, and redacts findings. Hosted runs and required-check enforcement need separate verification. Before pushing, follow the outgoing-history audit in [the setup guide](setup/SETUP.md).
+The Build and Test workflow installs from the lockfile on the Node version in `.nvmrc` and runs `npm run check`.
+
+Secret Scan uses pinned Gitleaks with its default rules and an additional rule for MongoDB connection URIs that embed a username and password. It scans merge diffs and redacts findings. The workflow exempts two exact historical findings for a rotated credential and a placeholder in the original environment template.
+
+Hosted runs and required-check enforcement need separate verification. Before pushing, follow the outgoing-history audit in [the setup guide](setup/SETUP.md).
 
 ## Setup baseline
 
