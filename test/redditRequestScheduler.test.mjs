@@ -221,6 +221,15 @@ test('drops queued work for the failed request while preserving other requests',
     assert.equal(siblingOperation.mock.calls.length, 0);
 });
 
+test('preserves a rejection without a reason', async () => {
+    const scheduler = new RedditRequestScheduler(createRequester());
+
+    await assert.rejects(
+        scheduler.execute(() => Promise.reject(undefined)),
+        (reason) => reason === undefined,
+    );
+});
+
 test('refuses work when the signal is already aborted', async () => {
     const operation = vi.fn();
     const scheduler = new RedditRequestScheduler(createRequester());

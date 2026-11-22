@@ -209,13 +209,13 @@ class RedditRequestScheduler {
             }
 
             if (nextJob.signal && nextJob.signal.aborted) {
-                this.settle(nextJob, createAbortError());
+                this.settle(nextJob, { error: createAbortError() });
                 continue;
             }
 
             const cooldownError = this.getCooldownError();
             if (cooldownError) {
-                this.settle(nextJob, cooldownError);
+                this.settle(nextJob, { error: cooldownError });
                 continue;
             }
 
@@ -236,16 +236,16 @@ class RedditRequestScheduler {
                 }
                 return job.operation();
             })
-            .then((result) => this.settle(job, null, result))
+            .then((result) => this.settle(job, { result }))
             .catch((error) => {
                 if (isRateLimitError(error)) {
                     const rateLimitError = this.startCooldown(error);
                     this.rejectPending(rateLimitError);
-                    this.settle(job, rateLimitError);
+                    this.settle(job, { error: rateLimitError });
                     return;
                 }
                 this.rejectPendingForSignal(job.signal, error);
-                this.settle(job, error);
+                this.settle(job, { error });
             })
             .finally(() => {
                 this.activeJob = null;
@@ -274,7 +274,7 @@ class RedditRequestScheduler {
 
     rejectPending(error) {
         const pendingJobs = this.pending.splice(0);
-        pendingJobs.forEach((job) => this.settle(job, error));
+        pendingJobs.forEach((job) => this.settle(job, { error }));
     }
 
     rejectPendingForSignal(signal, error) {
@@ -285,7 +285,7 @@ class RedditRequestScheduler {
         const retainedJobs = [];
         this.pending.forEach((job) => {
             if (job.signal === signal) {
-                this.settle(job, error);
+                this.settle(job, { error });
             } else {
                 retainedJobs.push(job);
             }
@@ -304,7 +304,7 @@ class RedditRequestScheduler {
         }
         const overloadError = new RedditQueueOverloadError();
         this.rejectPendingForSignal(job.signal, overloadError);
-        this.settle(job, overloadError);
+        this.settle(job, { error: overloadError });
         this.processNext();
     }
 
@@ -322,11 +322,11 @@ class RedditRequestScheduler {
 
         // A dispatched request cannot be cancelled through Snoowrap, but the
         // route can stop waiting for it while the scheduler stays single-flight.
-        this.settle(job, createAbortError());
+        this.settle(job, { error: createAbortError() });
         this.processNext();
     }
 
-    settle(job, error, result) {
+    settle(job, outcome) {
         if (job.settled) {
             return;
         }
@@ -335,10 +335,10 @@ class RedditRequestScheduler {
         if (job.signal && job.abortHandler) {
             job.signal.removeEventListener('abort', job.abortHandler);
         }
-        if (error) {
-            job.reject(error);
+        if ('error' in outcome) {
+            job.reject(outcome.error);
         } else {
-            job.resolve(result);
+            job.resolve(outcome.result);
         }
     }
 }
